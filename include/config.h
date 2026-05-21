@@ -148,10 +148,10 @@ static constexpr float PAN_PID_KI = 0.02f;
 static constexpr float PAN_PID_KD = 0.5f;
 
 /// Maximum stepper speed (steps/sec)
-static constexpr float PAN_MAX_SPEED       = 8000.0f;
+static constexpr float PAN_MAX_SPEED       = 4000.0f;
 
 /// Maximum stepper acceleration (steps/sec²)
-static constexpr float PAN_MAX_ACCEL       = 4000.0f;
+static constexpr float PAN_MAX_ACCEL       = 500.0f;
 #endif
 
 /// PID integral anti-windup limit (degrees)

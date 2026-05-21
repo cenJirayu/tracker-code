@@ -221,14 +221,15 @@ void processCommand(JsonDocument& doc) {
     }
     // ---- direct: set Az/El directly ----
     else if (strcmp(cmd, "direct") == 0) {
-        if (doc["az"].is<float>()) {
+        if (!doc["az"].isNull()) {
             targetAz = doc["az"].as<float>();
             actuators.setTargetAzimuth(targetAz);
         }
-        if (doc["el"].is<float>()) {
+        if (!doc["el"].isNull()) {
             targetEl = doc["el"].as<float>();
             actuators.setTiltAngle(targetEl);
         }
+        
         sweepState = SWEEP_NONE; // cancel any sweep
 
         JsonDocument ack;
@@ -238,6 +239,10 @@ void processCommand(JsonDocument& doc) {
     }
     // ---- inject: WGS84 coordinates → Az/El via Navigation ----
     else if (strcmp(cmd, "inject") == 0) {
+        if (doc["lat"].isNull() || doc["lon"].isNull() || doc["alt"].isNull()) {
+            sendError("inject: missing lat/lon/alt");
+            return;
+        }
         double tgtLat = doc["lat"].as<double>();
         double tgtLon = doc["lon"].as<double>();
         double tgtAlt = doc["alt"].as<double>();
@@ -260,6 +265,10 @@ void processCommand(JsonDocument& doc) {
     }
     // ---- set_base: update base station coordinates ----
     else if (strcmp(cmd, "set_base") == 0) {
+        if (doc["lat"].isNull() || doc["lon"].isNull() || doc["alt"].isNull()) {
+            sendError("set_base: missing lat/lon/alt");
+            return;
+        }
         baseLat = doc["lat"].as<double>();
         baseLon = doc["lon"].as<double>();
         baseAlt = doc["alt"].as<double>();
@@ -276,9 +285,17 @@ void processCommand(JsonDocument& doc) {
     }
     // ---- set_pid: update PID gains ----
     else if (strcmp(cmd, "set_pid") == 0) {
+        if (doc["kp"].isNull() || doc["ki"].isNull() || doc["kd"].isNull()) {
+            sendError("set_pid: missing kp/ki/kd");
+            return;
+        }
         float kp = doc["kp"].as<float>();
         float ki = doc["ki"].as<float>();
         float kd = doc["kd"].as<float>();
+        if (kp < 0.0f || ki < 0.0f || kd < 0.0f) {
+            sendError("set_pid: gains must be >= 0");
+            return;
+        }
         actuators.setPanPID(kp, ki, kd);
 
         JsonDocument ack;

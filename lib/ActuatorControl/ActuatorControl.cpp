@@ -52,6 +52,7 @@ void Actuators::begin() {
     digitalWrite(PIN_ENABLE, LOW);   // active-low enable on most TB6600
     _stepper.setMaxSpeed(PAN_MAX_SPEED);
     _stepper.setAcceleration(PAN_MAX_ACCEL);
+    _stepper.setMinPulseWidth(5);
 #endif
 
     // --- MCPWM Tilt Servo (300 Hz) — Legacy API ---
