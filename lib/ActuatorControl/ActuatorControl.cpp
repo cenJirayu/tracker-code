@@ -27,6 +27,7 @@ Actuators::Actuators()
     , _integralError(0.0f)
     , _prevError(0.0f)
     , _lastPidOutput(0.0f)
+    , _lastCommandedSPS(0.0f)
     , _lastPidUs(0)
 {}
 
@@ -150,6 +151,17 @@ void Actuators::updatePan() {
     float currentAz = getPanAngleDeg();
     float error = _angleDiffDeg(_targetAzDeg, currentAz);
 
+    // Deadband: hold still inside the window so quantization can't ratchet
+    // single-step ticks at rest.
+    if (fabsf(error) < PAN_DEADBAND_DEG) {
+        _integralError    = 0.0f;
+        _prevError        = error;
+        _lastPidOutput    = 0.0f;
+        _lastCommandedSPS = 0.0f;
+        _stepper.setSpeed(0.0f);
+        return;
+    }
+
     // PID with anti-windup
     _integralError += error * dt;
     if (_integralError > PAN_INTEGRAL_LIMIT)  _integralError = PAN_INTEGRAL_LIMIT;
@@ -168,6 +180,14 @@ void Actuators::updatePan() {
     float speedSPS = pidOutput * STEPS_PER_DEGREE;
     if (speedSPS > PAN_MAX_SPEED)  speedSPS = PAN_MAX_SPEED;
     if (speedSPS < -PAN_MAX_SPEED) speedSPS = -PAN_MAX_SPEED;
+
+    // Slew limit: cap |Δspeed| per tick to PAN_MAX_ACCEL × dt so the motor
+    // is never asked to jump faster than it can physically accelerate.
+    float maxDelta = PAN_MAX_ACCEL * dt;
+    float delta    = speedSPS - _lastCommandedSPS;
+    if (delta >  maxDelta) speedSPS = _lastCommandedSPS + maxDelta;
+    if (delta < -maxDelta) speedSPS = _lastCommandedSPS - maxDelta;
+    _lastCommandedSPS = speedSPS;
 
     _stepper.setSpeed(speedSPS);
 }
@@ -220,6 +240,17 @@ void Actuators::updatePanWithPosition(float currentAzDeg) {
 
     float error = _angleDiffDeg(_targetAzDeg, currentAzDeg);
 
+    // Deadband: hold still inside the window so quantization can't ratchet
+    // single-step ticks at rest.
+    if (fabsf(error) < PAN_DEADBAND_DEG) {
+        _integralError    = 0.0f;
+        _prevError        = error;
+        _lastPidOutput    = 0.0f;
+        _lastCommandedSPS = 0.0f;
+        _stepper.setSpeed(0.0f);
+        return;
+    }
+
     // PID with anti-windup
     _integralError += error * dt;
     if (_integralError > PAN_INTEGRAL_LIMIT)  _integralError = PAN_INTEGRAL_LIMIT;
@@ -238,6 +269,14 @@ void Actuators::updatePanWithPosition(float currentAzDeg) {
     float speedSPS = pidOutput * STEPS_PER_DEGREE;
     if (speedSPS > PAN_MAX_SPEED)  speedSPS = PAN_MAX_SPEED;
     if (speedSPS < -PAN_MAX_SPEED) speedSPS = -PAN_MAX_SPEED;
+
+    // Slew limit: cap |Δspeed| per tick to PAN_MAX_ACCEL × dt so the motor
+    // is never asked to jump faster than it can physically accelerate.
+    float maxDelta = PAN_MAX_ACCEL * dt;
+    float delta    = speedSPS - _lastCommandedSPS;
+    if (delta >  maxDelta) speedSPS = _lastCommandedSPS + maxDelta;
+    if (delta < -maxDelta) speedSPS = _lastCommandedSPS - maxDelta;
+    _lastCommandedSPS = speedSPS;
 
     _stepper.setSpeed(speedSPS);
 }

@@ -11,39 +11,20 @@
 #include <cstdint>
 
 // ============================================================================
-//  MOTOR DRIVER SELECTION
+//  MOTOR DRIVER 
 // ============================================================================
-// Uncomment ONE of the following to select your pan-axis motor driver:
-//   USE_TB6600   — NEMA17 stepper + TB6600 driver (STEP/DIR/EN)
-//   USE_ULN2003  — 28BYJ-48 stepper + ULN2003 driver (4-wire)
 
 #define USE_TB6600
-//#define USE_ULN2003
-
-// Uncomment ONE of the following to select your tilt servo:
-//   USE_DS51150  — DS51150 heavy-duty servo (300 Hz MCPWM, 270° range, 2:1 belt)
-//   USE_SG90     — SG90 micro servo (50 Hz standard PWM, 180° range, direct)
-
 #define USE_DS51150
-//#define USE_SG90
+
 
 // ============================================================================
 //  PIN ASSIGNMENTS
 // ============================================================================
 
-#ifdef USE_ULN2003
-// --- ULN2003 Driver + 28BYJ-48 Stepper (Pan Axis) ---
-// Pin order: IN1, IN2, IN3, IN4 on the ULN2003 board
-static constexpr int PIN_IN1 = 16;
-static constexpr int PIN_IN2 = 17;
-static constexpr int PIN_IN3 = 18;
-static constexpr int PIN_IN4 = 15;
-#else
-// --- TB6600 Stepper Driver (Pan Axis) ---
-static constexpr int PIN_STEP       = 16;
+static constexpr int PIN_STEP       = 16; //Pulse
 static constexpr int PIN_DIR        = 17;
 static constexpr int PIN_ENABLE     = 18;
-#endif
 
 // --- AS5048A Magnetic Encoder (SPI) ---
 static constexpr int PIN_ENC_CS     = 5;
@@ -74,12 +55,6 @@ static constexpr double MAGNETIC_DECLINATION_DEG = 0.5;
 //  MECHANICAL CONSTANTS
 // ============================================================================
 
-#ifdef USE_ULN2003
-/// 28BYJ-48 with internal 1:63.68 gear ratio
-/// Half-step mode: 64 half-steps/motor-rev × 63.68 gear ratio ≈ 4076 steps/rev
-static constexpr float PAN_GEAR_RATIO      = 1.0f;   // no external gearing
-static constexpr float MOTOR_STEPS_PER_REV = 4076.0f; // half-step with internal gear
-#else
 /// Pan axis gear reduction ratio (motor:output).
 /// 2.0 means 2 motor revolutions = 1 output revolution.
 static constexpr float PAN_GEAR_RATIO      = 2.0f;
@@ -88,36 +63,23 @@ static constexpr float PAN_GEAR_RATIO      = 2.0f;
 /// Adjust to match your TB6600 DIP-switch microstepping setting.
 /// Example: 200 full-steps × 16 microsteps = 3200
 static constexpr float MOTOR_STEPS_PER_REV = 200.0f * 16.0f;
-#endif
 
 /// Derived: steps per degree at the output shaft (after gearing).
 static constexpr float STEPS_PER_DEGREE    = (MOTOR_STEPS_PER_REV * PAN_GEAR_RATIO) / 360.0f;
 
-#ifdef USE_SG90
-/// SG90: direct drive, 0-180° range
-static constexpr float TILT_MIN_DEG = 0.0f;
-static constexpr float TILT_MAX_DEG = 180.0f;
-#else
+
 /// DS51150: 2:1 belt reduction on a 270° servo → 135° usable sweep.
 static constexpr float TILT_MIN_DEG = 0.0f;
 static constexpr float TILT_MAX_DEG = 135.0f;
-#endif
 
 // ============================================================================
 //  TILT SERVO TIMING
 // ============================================================================
 
-#ifdef USE_SG90
-/// SG90: standard 50 Hz PWM, 500-2400µs pulse range for 0°-180°
-static constexpr uint32_t SERVO_FREQ_HZ      = 50;
-static constexpr uint32_t SERVO_MIN_PULSE_US  = 500;    // 0°
-static constexpr uint32_t SERVO_MAX_PULSE_US  = 2400;   // 180°
-#else
 /// DS51150: 300 Hz high-frequency PWM, 500-2500µs for 0°-270°
 static constexpr uint32_t SERVO_FREQ_HZ      = 300;
 static constexpr uint32_t SERVO_MIN_PULSE_US  = 500;    // 0°
 static constexpr uint32_t SERVO_MAX_PULSE_US  = 2500;   // 270°
-#endif
 
 // ============================================================================
 //  AS5048A ENCODER
@@ -130,32 +92,24 @@ static constexpr uint32_t AS5048A_SPI_SPEED  = 1000000; // 1 MHz SPI clock
 //  PAN PID TUNING
 // ============================================================================
 
-#ifdef USE_ULN2003
-/// PID gains tuned for 28BYJ-48 (slower, lower inertia)
-static constexpr float PAN_PID_KP = 2.0f;
-static constexpr float PAN_PID_KI = 0.01f;
-static constexpr float PAN_PID_KD = 0.3f;
-
-/// Maximum stepper speed (steps/sec) — 28BYJ-48 stalls above ~800 sps
-static constexpr float PAN_MAX_SPEED       = 800.0f;
-
-/// Maximum stepper acceleration (steps/sec²)
-static constexpr float PAN_MAX_ACCEL       = 400.0f;
-#else
 /// Default PID gains — tune on actual hardware.
 static constexpr float PAN_PID_KP = 4.0f;
 static constexpr float PAN_PID_KI = 0.02f;
 static constexpr float PAN_PID_KD = 0.5f;
 
 /// Maximum stepper speed (steps/sec)
-static constexpr float PAN_MAX_SPEED       = 4000.0f;
+static constexpr float PAN_MAX_SPEED       = 2000.0f;
 
 /// Maximum stepper acceleration (steps/sec²)
-static constexpr float PAN_MAX_ACCEL       = 500.0f;
-#endif
+static constexpr float PAN_MAX_ACCEL       = 4000.0f;
 
 /// PID integral anti-windup limit (degrees)
 static constexpr float PAN_INTEGRAL_LIMIT  = 50.0f;
+
+/// Deadband around target (degrees). Inside this window the PID holds the
+/// motor still and zeroes its integral, so quantization in the simulated
+/// encoder doesn't ratchet single-step ticks at rest.
+static constexpr float PAN_DEADBAND_DEG    = 0.2f;
 
 // ============================================================================
 //  ALPHA-BETA FILTER TUNING

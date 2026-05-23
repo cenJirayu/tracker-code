@@ -64,6 +64,7 @@ private:
     float  _integralError;
     float  _prevError;
     float  _lastPidOutput;
+    float  _lastCommandedSPS;
     unsigned long _lastPidUs;
 
     // AS5048A helpers
