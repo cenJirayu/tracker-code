@@ -43,18 +43,12 @@ void Actuators::begin() {
     delayMicroseconds(10);
     _spiTransfer16(0x0000);
 
-#ifdef USE_ULN2003
-    // --- ULN2003 + 28BYJ-48: no enable pin, just set speed/accel ---
-    _stepper.setMaxSpeed(PAN_MAX_SPEED);
-    _stepper.setAcceleration(PAN_MAX_ACCEL);
-#else
     // --- TB6600 Stepper Driver ---
     pinMode(PIN_ENABLE, OUTPUT);
     digitalWrite(PIN_ENABLE, LOW);   // active-low enable on most TB6600
     _stepper.setMaxSpeed(PAN_MAX_SPEED);
     _stepper.setAcceleration(PAN_MAX_ACCEL);
     _stepper.setMinPulseWidth(5);
-#endif
 
     // --- MCPWM Tilt Servo (300 Hz) — Legacy API ---
     mcpwm_gpio_init(SERVO_MCPWM_UNIT, MCPWM0A, PIN_TILT_SERVO);

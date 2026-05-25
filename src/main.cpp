@@ -15,11 +15,13 @@
 #include "config.h"
 #include "ActuatorControl.h"
 #include "Navigation.h"
+#include "GNSSManager.h"
 
 // ============================================================================
 //  Global Objects
 // ============================================================================
-Actuators actuators;
+Actuators   actuators;
+GNSSManager gnss;
 
 // ============================================================================
 //  Sensor Availability Flags (toggled via Web UI at runtime)
@@ -27,6 +29,9 @@ Actuators actuators;
 bool hasEncoder      = false;   // AS5048A magnetic encoder
 bool hasMagnetometer = false;   // MMC5983MA magnetometer
 bool hasGNSS         = false;   // u-blox GNSS module
+
+// True when gnss.begin() succeeded; independent of the runtime toggle.
+bool gnssHardwareOk  = false;
 
 // ============================================================================
 //  Base Station Position (manual entry or GNSS)
@@ -87,6 +92,45 @@ void setup() {
     // Initialize actuators (servo + stepper + encoder SPI)
     // Encoder SPI init is harmless even when hardware is absent
     actuators.begin();
+
+    // Initialize GNSS on I2C and wait for a precise fix to set base station.
+    gnssHardwareOk = gnss.begin();
+    if (gnssHardwareOk) {
+        Serial.println("HIL: GNSS OK — waiting for precise fix...");
+        uint32_t gnssStart   = millis();
+        uint32_t gnssLastLog = 0;
+        while (millis() - gnssStart < GNSS_FIX_TIMEOUT_MS) {
+            gnss.update();
+            if (gnss.isValid()
+                    && gnss.getSatsUsed() >= GNSS_PRECISE_MIN_SATS
+                    && gnss.getHorizAccM() <= GNSS_PRECISE_MAX_HACC_M) {
+                baseLat  = gnss.getLat();
+                baseLon  = gnss.getLon();
+                baseAlt  = gnss.getAlt();
+                hasGNSS  = true;
+                Serial.print("HIL: Base set from GNSS. Sats=");
+                Serial.print(gnss.getSatsUsed());
+                Serial.print(" hAcc=");
+                Serial.print(gnss.getHorizAccM(), 1);
+                Serial.println("m");
+                break;
+            }
+            uint32_t now = millis();
+            if (now - gnssLastLog >= 5000) {
+                gnssLastLog = now;
+                Serial.print("HIL: GNSS searching — fix=");
+                Serial.print(gnss.getFixType());
+                Serial.print(" sats=");
+                Serial.println(gnss.getSatsUsed());
+            }
+            delay(100);
+        }
+        if (!hasGNSS) {
+            Serial.println("HIL: GNSS timeout — using default base station.");
+        }
+    } else {
+        Serial.println("HIL: GNSS not found on I2C.");
+    }
 
     // Reserve buffer for serial input
     serialBuffer.reserve(256);
@@ -151,6 +195,16 @@ void loop() {
     // 1. Parse incoming JSON commands (non-blocking)
     parseSerialJSON();
 
+    // 1a. Poll GNSS and update base station when enabled
+    if (gnssHardwareOk) {
+        gnss.update();
+        if (hasGNSS && gnss.isValid()) {
+            baseLat = gnss.getLat();
+            baseLon = gnss.getLon();
+            baseAlt = gnss.getAlt();
+        }
+    }
+
     // 2. Update sweep animation if active
     updateSweep();
 
@@ -211,7 +265,16 @@ void processCommand(JsonDocument& doc) {
     if (strcmp(cmd, "set_sensors") == 0) {
         if (doc["enc"].is<bool>()) hasEncoder      = doc["enc"];
         if (doc["mag"].is<bool>()) hasMagnetometer = doc["mag"];
-        if (doc["gps"].is<bool>()) hasGNSS         = doc["gps"];
+        if (doc["gps"].is<bool>()) {
+            bool newGNSS = doc["gps"];
+            // Apply current GNSS fix immediately when enabling
+            if (newGNSS && !hasGNSS && gnssHardwareOk && gnss.isValid()) {
+                baseLat = gnss.getLat();
+                baseLon = gnss.getLon();
+                baseAlt = gnss.getAlt();
+            }
+            hasGNSS = newGNSS;
+        }
 
         JsonDocument ack;
         ack["enc"] = hasEncoder;
@@ -423,6 +486,19 @@ void sendTelemetry() {
         default: break;
     }
     doc["sweep"] = sweepStr;
+
+    // Base station position and source
+    doc["base_lat"] = serialized(String(baseLat, 6));
+    doc["base_lon"] = serialized(String(baseLon, 6));
+    doc["base_alt"] = serialized(String((float)baseAlt, 1));
+    doc["base_src"] = (hasGNSS && gnssHardwareOk) ? "gnss" : "manual";
+
+    // GNSS fix quality (always reported when hardware is present)
+    if (gnssHardwareOk) {
+        doc["gnss_fix"]  = gnss.getFixType();
+        doc["gnss_sats"] = gnss.getSatsUsed();
+        doc["gnss_hacc"] = serialized(String(gnss.getHorizAccM(), 1));
+    }
 
     serializeJson(doc, Serial);
     Serial.println();

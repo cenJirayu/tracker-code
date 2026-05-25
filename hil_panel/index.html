@@ -59,6 +59,11 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2)}
 .scene-info{position:absolute;bottom:8px;left:8px;display:flex;gap:12px;font-size:.7rem;color:var(--text2);background:rgba(10,14,26,0.8);padding:4px 10px;border-radius:6px;pointer-events:none}
 .scene-info .val{color:var(--accent);font-family:'JetBrains Mono',monospace;font-weight:600}
 #chartCanvas{width:100%;height:160px;border-radius:8px;background:rgba(15,20,40,0.5)}
+.gnss-badge{display:none;font-size:.6rem;font-weight:700;letter-spacing:1px;padding:2px 7px;border-radius:4px;background:rgba(52,211,153,0.15);color:var(--green);border:1px solid rgba(52,211,153,0.35);vertical-align:middle;margin-left:8px}
+.gnss-badge.active{display:inline}
+.gnss-status{font-size:.7rem;color:var(--text2);font-family:'JetBrains Mono',monospace;margin-top:4px;min-height:1rem}
+.gnss-status .ok{color:var(--green)}.gnss-status .warn{color:var(--yellow)}
+input[type=number]:read-only{opacity:.6;cursor:not-allowed;border-color:rgba(52,211,153,0.2)}
 #serialLog{width:100%;height:120px;background:rgba(10,14,26,0.9);border:1px solid var(--border);border-radius:8px;padding:8px;font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--green);overflow-y:auto;resize:vertical;white-space:pre-wrap;word-break:break-all}
 .presets{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 @media(max-width:768px){.row-2{grid-template-columns:1fr}.input-row{grid-template-columns:1fr 1fr}.app{padding:8px}}
@@ -135,13 +140,15 @@ input[type=range]::-webkit-slider-thumb:hover{transform:scale(1.2)}
   <!-- Coordinate Injection -->
   <div class="card">
     <div class="card-title"><span>🗺️</span> Coordinate Injection</div>
-    <label style="margin-bottom:6px;font-size:.75rem;font-weight:500;color:var(--text)">Base Station</label>
-    <div class="input-row" style="margin-bottom:12px">
-      <div class="input-group"><label>Latitude</label><input type="number" id="baseLat" value="13.7563" step="0.0001"></div>
-      <div class="input-group"><label>Longitude</label><input type="number" id="baseLon" value="100.5018" step="0.0001"></div>
-      <div class="input-group"><label>Altitude (m)</label><input type="number" id="baseAlt" value="10" step="1"></div>
-      <button class="btn btn-sm" onclick="sendBase()">Set Base</button>
+    <label style="margin-bottom:6px;font-size:.75rem;font-weight:500;color:var(--text)">Base Station<span class="gnss-badge" id="gnssBadge">GNSS LIVE</span></label>
+    <div class="input-row" style="margin-bottom:4px">
+      <div class="input-group"><label>Latitude</label><input type="number" id="baseLat" value="13.7563" step="0.000001"></div>
+      <div class="input-group"><label>Longitude</label><input type="number" id="baseLon" value="100.5018" step="0.000001"></div>
+      <div class="input-group"><label>Altitude (m)</label><input type="number" id="baseAlt" value="10" step="0.1"></div>
+      <button class="btn btn-sm" id="btnSetBase" onclick="sendBase()">Set Base</button>
     </div>
+    <div class="gnss-status" id="gnssStatus"></div>
+    <div style="margin-bottom:8px"></div>
     <label style="margin-bottom:6px;font-size:.75rem;font-weight:500;color:var(--text)">Target</label>
     <div class="input-row">
       <div class="input-group"><label>Latitude</label><input type="number" id="tgtLat" value="13.7653" step="0.0001"></div>
@@ -209,7 +216,40 @@ function updateConnectionUI(c){const r=document.getElementById('statusRow'),t=do
 async function sendString(s){if(!writer)return;try{await writer.write(new TextEncoder().encode(s+'\n'))}catch(e){logSerial('Write error: '+e.message,'#f87171')}}
 window.sendCmd=function(o){sendString(JSON.stringify(o));logSerial('> '+JSON.stringify(o),'#6c8cff')};
 const chartData={azT:[],azC:[],elT:[],elC:[],ts:[]},MAX_CHART=300;
-function processIncoming(line){logSerial('< '+line,'#94a3b8');try{const d=JSON.parse(line);if(d.t==='tel'){document.getElementById('telAzT').textContent=d.az_t+'°';document.getElementById('telAzC').textContent=d.az_c+'°';document.getElementById('telElT').textContent=d.el_t+'°';document.getElementById('telElC').textContent=d.el_c+'°';document.getElementById('telPid').textContent=d.pid;document.getElementById('telSpd').textContent=d.spd;document.getElementById('telSweep').textContent=d.sweep||'none';document.getElementById('telUp').textContent=(d.up/1000).toFixed(1)+'s';updateTrackerModel(parseFloat(d.az_c),parseFloat(d.el_c));const now=performance.now()/1000;chartData.azT.push(parseFloat(d.az_t));chartData.azC.push(parseFloat(d.az_c));chartData.elT.push(parseFloat(d.el_t));chartData.elC.push(parseFloat(d.el_c));chartData.ts.push(now);if(chartData.ts.length>MAX_CHART){chartData.azT.shift();chartData.azC.shift();chartData.elT.shift();chartData.elC.shift();chartData.ts.shift()}drawChart()}}catch(e){}}
+function processIncoming(line){logSerial('< '+line,'#94a3b8');try{const d=JSON.parse(line);if(d.t==='tel'){document.getElementById('telAzT').textContent=d.az_t+'°';document.getElementById('telAzC').textContent=d.az_c+'°';document.getElementById('telElT').textContent=d.el_t+'°';document.getElementById('telElC').textContent=d.el_c+'°';document.getElementById('telPid').textContent=d.pid;document.getElementById('telSpd').textContent=d.spd;document.getElementById('telSweep').textContent=d.sweep||'none';document.getElementById('telUp').textContent=(d.up/1000).toFixed(1)+'s';updateTrackerModel(parseFloat(d.az_c),parseFloat(d.el_c));const now=performance.now()/1000;chartData.azT.push(parseFloat(d.az_t));chartData.azC.push(parseFloat(d.az_c));chartData.elT.push(parseFloat(d.el_t));chartData.elC.push(parseFloat(d.el_c));chartData.ts.push(now);if(chartData.ts.length>MAX_CHART){chartData.azT.shift();chartData.azC.shift();chartData.elT.shift();chartData.elC.shift();chartData.ts.shift()}drawChart();updateBaseTel(d)}}catch(e){}}
+function updateBaseTel(d){
+  const isGnss=d.base_src==='gnss';
+  const badge=document.getElementById('gnssBadge');
+  const status=document.getElementById('gnssStatus');
+  const latEl=document.getElementById('baseLat');
+  const lonEl=document.getElementById('baseLon');
+  const altEl=document.getElementById('baseAlt');
+  const btnBase=document.getElementById('btnSetBase');
+
+  badge.className='gnss-badge'+(isGnss?' active':'');
+
+  if(d.base_lat!==undefined){
+    latEl.value=parseFloat(d.base_lat).toFixed(6);
+    lonEl.value=parseFloat(d.base_lon).toFixed(6);
+    altEl.value=parseFloat(d.base_alt).toFixed(1);
+  }
+
+  // Make inputs read-only and disable Set Base when GNSS is driving the position
+  [latEl,lonEl,altEl].forEach(el=>{isGnss?el.setAttribute('readonly',''):el.removeAttribute('readonly')});
+  if(btnBase)btnBase.disabled=isGnss;
+
+  // Show fix quality
+  if(d.gnss_fix!==undefined){
+    const fixLabels=['No fix','DR','2D','3D','GNSS+DR','Time only'];
+    const label=fixLabels[d.gnss_fix]||'Unknown';
+    const ok=d.gnss_fix>=3;
+    const sats=d.gnss_sats!==undefined?` · Sats: ${d.gnss_sats}`:'';
+    const hacc=d.gnss_hacc!==undefined?` · hAcc: ${parseFloat(d.gnss_hacc).toFixed(1)}m`:'';
+    status.innerHTML=`<span class="${ok?'ok':'warn'}">Fix: ${label}${sats}${hacc}</span>`;
+  } else {
+    status.textContent='';
+  }
+}
 function logSerial(msg,color='#94a3b8'){const el=document.getElementById('serialLog'),line=document.createElement('div');line.style.color=color;line.textContent=msg;el.appendChild(line);if(el.children.length>200)el.removeChild(el.firstChild);el.scrollTop=el.scrollHeight}
 window.sendSensorConfig=function(){sendCmd({cmd:'set_sensors',enc:document.getElementById('chkEncoder').checked,mag:document.getElementById('chkMag').checked,gps:document.getElementById('chkGPS').checked})};
 window.onElSlider=function(v){document.getElementById('elVal').textContent=parseFloat(v).toFixed(1)+'°';sendCmd({cmd:'direct',el:parseFloat(v)});targetEl=parseFloat(v);update3DTarget(targetAz,targetEl)};

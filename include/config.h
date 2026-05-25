@@ -150,4 +150,17 @@ static constexpr unsigned long TELEMETRY_INTERVAL_MS = 100;  // 10 Hz
 /// Sweep test speed (degrees per second)
 static constexpr float SWEEP_SPEED_DEG_PER_SEC = 30.0f;
 
+// ============================================================================
+//  GNSS PRECISE-FIX THRESHOLDS (base station auto-set in setup)
+// ============================================================================
+
+/// Minimum satellites-in-view required to accept a fix as "precise".
+static constexpr uint8_t  GNSS_PRECISE_MIN_SATS  = 6;
+
+/// Maximum horizontal accuracy (metres) required to accept the fix.
+static constexpr float    GNSS_PRECISE_MAX_HACC_M = 5.0f;
+
+/// How long setup() waits for a precise fix before falling back to defaults.
+static constexpr uint32_t GNSS_FIX_TIMEOUT_MS     = 120000;  // 120 s
+
 #endif // CONFIG_H
