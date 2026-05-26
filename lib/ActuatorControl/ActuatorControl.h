@@ -72,6 +72,11 @@ private:
     uint16_t _buildReadCommand(uint16_t address);
     static uint8_t _evenParity(uint16_t value);
     static float _angleDiffDeg(float target, float current);
+
+    // Shared PID core. Both updatePan() and updatePanWithPosition() compute
+    // their own positional error, then delegate the deadband + anti-windup +
+    // slew-limited PID math here. Owns the dt calculation from _lastPidUs.
+    void _runPid(float error);
 };
 
 #endif // ACTUATOR_CONTROL_H
