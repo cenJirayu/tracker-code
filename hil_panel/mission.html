@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cursr-V · Mission Console</title>
+<style>
+/* ===========================================================================
+   Cursr-V HIL — Mission Console (Version B)
+   Self-contained: no external scripts, no web fonts, no internet required.
+   Open directly in Chrome or Edge (Web Serial API).
+   =========================================================================== */
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0e1a; --card:#141a2e; --card2:#0f1424; --border:#26304d;
+  --accent:#6c8cff; --accent2:#a78bfa; --green:#34d399; --red:#f87171;
+  --yellow:#fbbf24; --text:#e2e8f0; --text2:#94a3b8; --radius:12px;
+  --mono:ui-monospace,"Cascadia Code","Consolas",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh}
+.app{max-width:1500px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+a{color:var(--accent)}
+
+/* Header */
+.header{display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:12px 20px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);flex-wrap:wrap}
+.header h1{font-size:1.1rem;font-weight:600;color:var(--accent)}
+.header .sub{font-size:.72rem;color:var(--text2)}
+.connect-area{display:flex;align-items:center;gap:12px}
+.status-row{display:flex;align-items:center;gap:8px;font-size:.8rem}
+.status-dot{width:9px;height:9px;border-radius:50%;background:var(--red);box-shadow:0 0 8px var(--red);transition:.3s}
+.status-row.connected .status-dot{background:var(--green);box-shadow:0 0 8px var(--green)}
+
+/* Buttons */
+.btn{padding:8px 16px;border:1px solid var(--border);border-radius:8px;background:#1b2238;
+  color:var(--accent);font-family:var(--sans);font-size:.8rem;font-weight:500;cursor:pointer;transition:.15s;white-space:nowrap}
+.btn:hover:not(:disabled){background:#243056;border-color:var(--accent)}
+.btn:disabled{opacity:.38;cursor:not-allowed}
+.btn-green{background:#10301f;color:var(--green);border-color:#1d6943}
+.btn-green:hover:not(:disabled){background:#174a30}
+.btn-red{background:#341a1a;color:var(--red);border-color:#7a2f2f}
+.btn-red:hover:not(:disabled){background:#4a2424}
+.btn-sm{padding:5px 10px;font-size:.72rem}
+.btn-group{display:flex;gap:6px;flex-wrap:wrap}
+
+/* Cards */
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.card.dim{opacity:.5;pointer-events:none}
+.card-title{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:1.4px;
+  color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.grid{display:grid;gap:12px}
+.cols-2{grid-template-columns:1.3fr 1fr}
+.cols-3{grid-template-columns:repeat(3,1fr)}
+
+/* Phase bar */
+.phasebar{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.phases{display:flex;align-items:center;gap:6px}
+.phase{display:flex;align-items:center;gap:8px;padding:7px 14px;border-radius:8px;
+  border:1px solid var(--border);background:var(--card2);font-size:.8rem;color:var(--text2)}
+.phase .n{width:18px;height:18px;border-radius:50%;background:var(--border);color:var(--text);
+  display:flex;align-items:center;justify-content:center;font-size:.66rem;font-weight:700}
+.phase.active{border-color:var(--accent);color:var(--text);box-shadow:0 0 0 1px var(--accent) inset}
+.phase.active .n{background:var(--accent)}
+.phase.done{border-color:#1d6943;color:var(--green)}
+.phase.done .n{background:var(--green);color:#06281a}
+.phase-sep{color:var(--border)}
+.phase-actions{display:flex;gap:8px;margin-left:auto;flex-wrap:wrap}
+.phase-hint{font-size:.7rem;color:var(--yellow);min-height:1rem}
+
+/* Inputs */
+label{font-size:.68rem;color:var(--text2);margin-bottom:4px;display:block}
+input[type=number],input[type=text]{width:100%;background:var(--card2);border:1px solid var(--border);
+  border-radius:6px;padding:6px 9px;color:var(--text);font-family:var(--mono);font-size:.78rem}
+input:focus{outline:none;border-color:var(--accent)}
+input:disabled{opacity:.5}
+input[readonly]{opacity:.7;border-style:dashed}
+select{background:var(--card2);border:1px solid var(--border);border-radius:6px;padding:5px 9px;
+  color:var(--text);font-family:var(--sans);font-size:.78rem;cursor:pointer}
+.field{display:flex;flex-direction:column;gap:2px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:8px;align-items:end}
+.sliderbox{margin:6px 0 10px}
+.sliderbox label{display:flex;justify-content:space-between;align-items:center}
+.sliderval{font-family:var(--mono);color:var(--accent);font-weight:600;font-size:.85rem}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:3px;
+  background:#243056;outline:none;margin:7px 0}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;
+  background:var(--accent);cursor:pointer;box-shadow:0 0 8px rgba(108,140,255,.5)}
+input[type=range]:disabled::-webkit-slider-thumb{background:var(--text2);box-shadow:none}
+.toggles{display:flex;gap:16px;flex-wrap:wrap}
+.toggle{display:flex;align-items:center;gap:6px;font-size:.78rem;cursor:pointer}
+.toggle input{accent-color:var(--accent);width:15px;height:15px}
+
+/* Scene */
+.scene-wrap{position:relative}
+#scene{width:100%;height:420px;display:block;border-radius:8px;background:#070b15;border:1px solid var(--border)}
+.scene-info{position:absolute;left:10px;bottom:10px;display:flex;gap:14px;font-size:.72rem;
+  background:rgba(7,11,21,.82);padding:6px 12px;border-radius:8px;pointer-events:none}
+.scene-info b{color:var(--accent);font-family:var(--mono);font-weight:600}
+.scene-info .cur b{color:var(--green)}
+.scene-legend{position:absolute;right:10px;top:10px;display:flex;flex-direction:column;gap:3px;
+  font-size:.66rem;color:var(--text2);background:rgba(7,11,21,.7);padding:6px 9px;border-radius:8px;pointer-events:none}
+.scene-legend i{display:inline-block;width:18px;height:0;border-top:2px solid;margin-right:6px;vertical-align:middle}
+
+/* Telemetry tiles */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(108px,1fr));gap:8px}
+.tile{background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:8px 6px;text-align:center}
+.tile .k{font-size:.58rem;text-transform:uppercase;letter-spacing:.8px;color:var(--text2);margin-bottom:3px}
+.tile .v{font-family:var(--mono);font-size:1.02rem;font-weight:600;color:var(--green)}
+.tile .v.sub{font-size:.66rem;color:var(--text2);font-weight:400;margin-top:2px}
+
+/* Pipeline */
+.pipe{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
+.stage{flex:1;min-width:130px;background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:10px}
+.stage h4{font-size:.6rem;text-transform:uppercase;letter-spacing:1px;color:var(--accent2);margin-bottom:8px}
+.kv{margin-bottom:5px}
+.kv .kk{font-size:.55rem;color:var(--text2);letter-spacing:.4px}
+.kv .vv{font-family:var(--mono);font-size:.78rem;color:var(--green);font-weight:600;word-break:break-all}
+.arrow{display:flex;align-items:center;color:#3b466b;font-size:1.3rem;flex-shrink:0}
+
+/* Chart + log */
+#chart{width:100%;height:170px;border-radius:8px;background:var(--card2);border:1px solid var(--border)}
+#log{height:140px;overflow-y:auto;background:#070b15;border:1px solid var(--border);border-radius:8px;
+  padding:8px;font-family:var(--mono);font-size:.7rem;white-space:pre-wrap;word-break:break-all}
+#log div{padding:1px 0}
+.sim-status{font-family:var(--mono);font-size:.68rem;color:var(--accent2);margin-top:6px;min-height:.9rem}
+@media(max-width:960px){.cols-2,.cols-3{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <h1>Cursr-V · Mission Console</h1>
+      <div class="sub">Integrated HIL mission — every sensor &amp; actuator working in concert · <a href="test_bench.html">Test bench →</a></div>
+    </div>
+    <div class="connect-area">
+      <div class="status-row" id="statusRow"><span class="status-dot"></span><span id="statusText">Disconnected</span></div>
+      <button class="btn btn-green" id="btnConnect">Connect</button>
+    </div>
+  </div>
+
+  <!-- Phase bar -->
+  <div class="card">
+    <div class="phasebar">
+      <div class="phases">
+        <div class="phase" id="phSetup"><span class="n">1</span> Setup</div>
+        <span class="phase-sep">→</span>
+        <div class="phase" id="phStandby"><span class="n">2</span> Standby</div>
+        <span class="phase-sep">→</span>
+        <div class="phase" id="phActive"><span class="n">3</span> Active</div>
+      </div>
+      <div class="phase-actions">
+        <button class="btn btn-sm" id="btnReconfigure">◂ Reconfigure</button>
+        <button class="btn btn-sm" id="btnArm">Arm ▸ Standby</button>
+        <button class="btn btn-sm btn-green" id="btnActive">Go Active ▸</button>
+        <button class="btn btn-sm btn-red" id="btnStandDown">■ Stand Down</button>
+      </div>
+    </div>
+    <div class="phase-hint" id="phaseHint"></div>
+  </div>
+
+  <div class="grid cols-2">
+    <!-- Scene -->
+    <div class="card">
+      <div class="card-title">🌐 Tracker Sphere</div>
+      <div class="scene-wrap">
+        <canvas id="scene"></canvas>
+        <div class="scene-info">
+          <span>Target Az <b id="siAzT">0.0°</b></span>
+          <span>El <b id="siElT">0.0°</b></span>
+          <span class="cur">Current Az <b id="siAzC">0.0°</b></span>
+          <span class="cur">El <b id="siElC">0.0°</b></span>
+        </div>
+        <div class="scene-legend">
+          <span><i style="border-color:var(--accent)"></i>Target</span>
+          <span><i style="border-color:var(--green)"></i>Current</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right column: setup + control stacked -->
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <!-- Setup -->
+      <div class="card" id="setupCard">
+        <div class="card-title">⚙️ Setup &amp; Configuration</div>
+        <label>Base Station <span id="baseSrcTag" style="color:var(--text2)">(manual)</span></label>
+        <div class="row3" style="margin-bottom:10px">
+          <div class="field"><label>Lat °</label><input type="number" id="baseLat" value="13.756300" step="0.000001"></div>
+          <div class="field"><label>Lon °</label><input type="number" id="baseLon" value="100.501800" step="0.000001"></div>
+          <div class="field"><label>Alt m</label><input type="number" id="baseAlt" value="10" step="0.1"></div>
+          <button class="btn btn-sm" id="btnSetBase">Set</button>
+        </div>
+        <div class="toggles" style="margin-bottom:12px">
+          <label class="toggle"><input type="checkbox" id="chkEnc"> AS5048A encoder</label>
+          <label class="toggle"><input type="checkbox" id="chkGps"> u-blox GNSS</label>
+        </div>
+        <label>PID gains (pan)</label>
+        <div class="grid cols-3" style="margin-top:4px">
+          <div class="sliderbox"><label>Kp <span class="sliderval" id="kpVal">4.00</span></label><input type="range" id="kp" min="0" max="20" step="0.1" value="4"></div>
+          <div class="sliderbox"><label>Ki <span class="sliderval" id="kiVal">0.020</span></label><input type="range" id="ki" min="0" max="1" step="0.005" value="0.02"></div>
+          <div class="sliderbox"><label>Kd <span class="sliderval" id="kdVal">0.50</span></label><input type="range" id="kd" min="0" max="5" step="0.05" value="0.5"></div>
+        </div>
+      </div>
+
+      <!-- Control -->
+      <div class="card" id="controlCard">
+        <div class="card-title">🎯 Mission Control</div>
+        <div class="sliderbox"><label>Azimuth <span class="sliderval" id="azVal">0.0°</span></label>
+          <input type="range" id="az" min="0" max="359.9" step="0.5" value="0"></div>
+        <div class="sliderbox"><label>Elevation <span class="sliderval" id="elVal">0.0°</span></label>
+          <input type="range" id="el" min="0" max="135" step="0.5" value="0"></div>
+
+        <label>Target coordinate <span style="color:var(--text2)" id="rangeTag">(@ 5.0 km slant)</span></label>
+        <div class="row3" style="margin-bottom:8px">
+          <div class="field"><label>Lat °</label><input type="number" id="tgtLat" value="13.765300" step="0.000001"></div>
+          <div class="field"><label>Lon °</label><input type="number" id="tgtLon" value="100.501800" step="0.000001"></div>
+          <div class="field"><label>Alt m</label><input type="number" id="tgtAlt" value="500" step="1"></div>
+          <button class="btn btn-green btn-sm" id="btnInject">Inject</button>
+        </div>
+        <div class="btn-group" style="margin-bottom:12px">
+          <button class="btn btn-sm" data-preset="n">N 1km</button>
+          <button class="btn btn-sm" data-preset="e">E 1km</button>
+          <button class="btn btn-sm" data-preset="s">S 1km</button>
+          <button class="btn btn-sm" data-preset="w">W 1km</button>
+          <button class="btn btn-sm" data-preset="up">Overhead</button>
+          <button class="btn btn-sm btn-red" id="btnHome">Home</button>
+          <button class="btn btn-sm btn-red" id="btnStop">Stop</button>
+        </div>
+
+        <label>Trajectory simulator</label>
+        <div class="row3" style="margin-top:4px">
+          <div class="field"><label>Pattern</label>
+            <select id="simMode"><option value="circle">Circle</option><option value="fig8">Figure-8</option></select></div>
+          <div class="field"><label>Radius m</label><input type="number" id="simR" value="800" min="50" step="50"></div>
+          <div class="field"><label>Speed m/s</label><input type="number" id="simV" value="25" min="1" step="1"></div>
+          <button class="btn btn-sm btn-green" id="btnSim">▶ Run</button>
+        </div>
+        <div class="sim-status" id="simStatus"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Telemetry tiles -->
+  <div class="card">
+    <div class="card-title">📊 Live Telemetry — raw &amp; interpreted</div>
+    <div class="tiles">
+      <div class="tile"><div class="k">Az tgt / cur</div><div class="v" id="tAz">— / —</div></div>
+      <div class="tile"><div class="k">El tgt / cur</div><div class="v" id="tEl">— / —</div></div>
+      <div class="tile"><div class="k">PID out</div><div class="v" id="tPid">—</div><div class="v sub">deg/s</div></div>
+      <div class="tile"><div class="k">Stepper</div><div class="v" id="tSps">—</div><div class="v sub" id="tStep">step —</div></div>
+      <div class="tile"><div class="k">Encoder</div><div class="v" id="tEncDeg">—</div><div class="v sub" id="tEncRaw">raw —</div></div>
+      <div class="tile"><div class="k">Servo µs</div><div class="v" id="tSrv">—</div><div class="v sub" id="tSrvDeg">— °</div></div>
+      <div class="tile"><div class="k">GNSS fix</div><div class="v" id="tFix">—</div><div class="v sub" id="tSats">— sv</div></div>
+      <div class="tile"><div class="k">GNSS hAcc</div><div class="v" id="tHacc">—</div><div class="v sub" id="tHaccRaw">raw —</div></div>
+      <div class="tile"><div class="k">Sweep</div><div class="v" id="tSweep">—</div></div>
+      <div class="tile"><div class="k">Uptime</div><div class="v" id="tUp">—</div></div>
+    </div>
+  </div>
+
+  <div class="grid cols-2">
+    <!-- Pipeline -->
+    <div class="card">
+      <div class="card-title">🔗 Navigation Pipeline</div>
+      <div class="pipe">
+        <div class="stage"><h4>Base</h4>
+          <div class="kv"><div class="kk">Lat</div><div class="vv" id="pBLat">—</div></div>
+          <div class="kv"><div class="kk">Lon</div><div class="vv" id="pBLon">—</div></div>
+          <div class="kv"><div class="kk">Src</div><div class="vv" id="pBSrc">—</div></div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="stage"><h4>Target</h4>
+          <div class="kv"><div class="kk">Lat</div><div class="vv" id="pTLat">—</div></div>
+          <div class="kv"><div class="kk">Lon</div><div class="vv" id="pTLon">—</div></div>
+          <div class="kv"><div class="kk">Alt</div><div class="vv" id="pTAlt">—</div></div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="stage"><h4>Nav → Az/El</h4>
+          <div class="kv"><div class="kk">Az</div><div class="vv" id="pAz">—</div></div>
+          <div class="kv"><div class="kk">El</div><div class="vv" id="pEl">—</div></div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="stage"><h4>PID / Motor</h4>
+          <div class="kv"><div class="kk">PID</div><div class="vv" id="pPid">—</div></div>
+          <div class="kv"><div class="kk">Speed</div><div class="vv" id="pSps">—</div></div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="stage"><h4>Feedback</h4>
+          <div class="kv"><div class="kk">Az cur</div><div class="vv" id="pFbAz">—</div></div>
+          <div class="kv"><div class="kk">Encoder</div><div class="vv" id="pFbEnc">—</div></div>
+          <div class="kv"><div class="kk">GNSS</div><div class="vv" id="pFbGnss">—</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart -->
+    <div class="card">
+      <div class="card-title">📈 Response (Az/El, target vs current)</div>
+      <canvas id="chart"></canvas>
+    </div>
+  </div>
+
+  <!-- Serial log -->
+  <div class="card">
+    <div class="card-title">📋 Serial Log <button class="btn btn-sm" id="btnClearLog" style="margin-left:auto">Clear</button></div>
+    <div id="log"></div>
+  </div>
+
+</div>
+
+<script>
+"use strict";
+/* ===========================================================================
+   Cursr-V Mission Console — all logic. Classic script (no modules) so the file
+   runs straight from disk (file://) with no server and no internet.
+   =========================================================================== */
+
+// ---- tiny DOM helpers -----------------------------------------------------
+const $ = id => document.getElementById(id);
+const fmt = (x, n=1) => (x===null||x===undefined||Number.isNaN(x)) ? '—' : Number(x).toFixed(n);
+
+// ---- single source of truth ----------------------------------------------
+const SLANT_KM = 5.0;                       // assumed range for az/el → coordinate
+const FIX_LABELS = ['No fix','DR','2-D','3-D','GNSS+DR','Time'];
+const state = {
+  connected:false,
+  phase:'setup',                            // setup | standby | active
+  base:{lat:13.7563, lon:100.5018, alt:10, src:'manual'},
+  target:{az:0, el:0, lat:13.7653, lon:100.5018, alt:500},
+  tel:null,                                 // latest telemetry object
+};
+
+// ===========================================================================
+//  Web Serial transport
+// ===========================================================================
+let port=null, reader=null, writer=null, streamClosed=null, rxBuf='';
+
+async function connect(){
+  if(!navigator.serial){ log('Web Serial unavailable — use Chrome or Edge.','var(--red)'); return; }
+  try{
+    port = await navigator.serial.requestPort();
+    await port.open({baudRate:115200});
+    writer = port.writable.getWriter();
+    state.connected = true;
+    setConnUI(true);
+    applyPhase(state.phase);   // refresh phase-button guards now that we're live
+    readLoop();
+    log('— connected —','var(--green)');
+  }catch(e){ log('Connect failed: '+e.message,'var(--red)'); }
+}
+
+async function disconnect(){
+  state.connected = false;
+  stopSim();
+  try{
+    if(reader){ await reader.cancel(); reader.releaseLock(); }
+    if(streamClosed) await streamClosed.catch(()=>{});
+    if(writer) writer.releaseLock();
+    if(port) await port.close();
+  }catch(e){}
+  reader=writer=port=null;
+  setConnUI(false);
+  applyPhase('setup');
+  log('— disconnected —','var(--red)');
+}
+
+async function readLoop(){
+  const dec = new TextDecoderStream();
+  streamClosed = port.readable.pipeTo(dec.writable);
+  reader = dec.readable.getReader();
+  try{
+    while(true){
+      const {value,done} = await reader.read();
+      if(done) break;
+      rxBuf += value;
+      const lines = rxBuf.split('\n');
+      rxBuf = lines.pop();
+      for(const ln of lines){ const t=ln.trim(); if(t) onLine(t); }
+    }
+  }catch(e){ if(state.connected) log('Read error: '+e.message,'var(--red)'); }
+}
+
+async function send(obj){
+  const s = JSON.stringify(obj);
+  log('▸ '+s,'var(--accent)');
+  if(!writer){ log('  (not connected)','var(--text2)'); return; }
+  try{ await writer.write(new TextEncoder().encode(s+'\n')); }
+  catch(e){ log('Write error: '+e.message,'var(--red)'); }
+}
+
+function setConnUI(c){
+  $('statusRow').className = 'status-row'+(c?' connected':'');
+  $('statusText').textContent = c?'Connected':'Disconnected';
+  $('btnConnect').textContent = c?'Disconnect':'Connect';
+  $('btnConnect').className = 'btn '+(c?'btn-red':'btn-green');
+}
+
+// ===========================================================================
+//  Incoming messages
+// ===========================================================================
+function onLine(line){
+  let d; try{ d = JSON.parse(line); }catch(e){ return; }
+  if(d.t==='tel'){ log('◂ '+line,'var(--text2)'); onTelemetry(d); }
+  else if(d.t==='ready'){ log('◂ ready — '+d.motor+' / '+d.servo+'  gps_hw='+d.gps_hw,'var(--green)'); }
+  else if(d.t==='ack'){ log('◂ ack '+d.cmd,'var(--green)'); }
+  else if(d.t==='err'){ log('◂ ERR '+d.msg,'var(--red)'); }
+}
+
+function onTelemetry(d){
+  state.tel = d;
+  // base station echo keeps the panel and firmware in agreement
+  if(d.base_lat!==undefined){
+    state.base.lat=+d.base_lat; state.base.lon=+d.base_lon; state.base.alt=+d.base_alt; state.base.src=d.base_src;
+    const gnss = d.base_src==='gnss';
+    // Only auto-fill the inputs when the base is GNSS-driven (read-only). In
+    // manual mode the fields belong to the user — overwriting them every frame
+    // would fight typing during Setup. state.base still syncs unconditionally.
+    if(gnss){ $('baseLat').value=fmt(d.base_lat,6); $('baseLon').value=fmt(d.base_lon,6); $('baseAlt').value=fmt(d.base_alt,1); }
+    $('baseSrcTag').textContent = gnss?'(GNSS live)':'(manual)';
+    ['baseLat','baseLon','baseAlt'].forEach(k=> gnss?$(k).setAttribute('readonly',''):$(k).removeAttribute('readonly'));
+  }
+  renderTelemetry(d);
+  renderPipeline(d);
+  pushChart(d);
+}
+
+// ===========================================================================
+//  Geodesy — forward (lat/lon→az/el, matches firmware) + inverse (az/el→lat/lon)
+// ===========================================================================
+const A=6378137.0, F=1/298.257223563, B=A*(1-F), E2=1-(B*B)/(A*A);
+const D2R=Math.PI/180, R2D=180/Math.PI;
+function geodeticToECEF(latD,lonD,alt){
+  const la=latD*D2R, lo=lonD*D2R, sLa=Math.sin(la),cLa=Math.cos(la),sLo=Math.sin(lo),cLo=Math.cos(lo);
+  const N=A/Math.sqrt(1-E2*sLa*sLa);
+  return {x:(N+alt)*cLa*cLo, y:(N+alt)*cLa*sLo, z:(N*(1-E2)+alt)*sLa};
+}
+function ecefToENU(dx,dy,dz,latD,lonD){
+  const la=latD*D2R, lo=lonD*D2R, sLa=Math.sin(la),cLa=Math.cos(la),sLo=Math.sin(lo),cLo=Math.cos(lo);
+  return {
+    e:-sLo*dx+cLo*dy,
+    n:-sLa*cLo*dx - sLa*sLo*dy + cLa*dz,
+    u: cLa*cLo*dx + cLa*sLo*dy + sLa*dz
+  };
+}
+function pointing(base, tLat, tLon, tAlt){
+  const b=geodeticToECEF(base.lat,base.lon,base.alt), t=geodeticToECEF(tLat,tLon,tAlt);
+  const enu=ecefToENU(t.x-b.x, t.y-b.y, t.z-b.z, base.lat, base.lon);
+  let az=Math.atan2(enu.e, enu.n)*R2D; if(az<0) az+=360;
+  const el=Math.atan2(enu.u, Math.hypot(enu.e, enu.n))*R2D;
+  return {az, el};
+}
+// Inverse: synthesize a target coordinate at a fixed slant range (local-tangent,
+// accurate to a few metres over a few km — labelled in the UI as synthetic).
+function coordFromAzEl(base, azD, elD, slantM){
+  const az=azD*D2R, el=elD*D2R;
+  const horiz=slantM*Math.cos(el), up=slantM*Math.sin(el);
+  const east=horiz*Math.sin(az), north=horiz*Math.cos(az);
+  const mPerLat=111320, mPerLon=111320*Math.cos(base.lat*D2R);
+  return { lat:base.lat + north/mPerLat, lon:base.lon + east/mPerLon, alt:base.alt + up };
+}
+
+// ===========================================================================
+//  Target model — every edit funnels here so all views stay consistent
+// ===========================================================================
+function setTargetAzEl(az, el, {sendCmd=true}={}){
+  az=((az%360)+360)%360; el=Math.max(0,Math.min(135,el));
+  state.target.az=az; state.target.el=el;
+  const c=coordFromAzEl(state.base, az, el, SLANT_KM*1000);
+  state.target.lat=c.lat; state.target.lon=c.lon; state.target.alt=c.alt;
+  renderTarget();
+  if(sendCmd) send({cmd:'direct', az:round1(az), el:round1(el)});
+}
+function setTargetCoord(lat, lon, alt, {sendCmd=true}={}){
+  const p=pointing(state.base, lat, lon, alt);
+  state.target.lat=lat; state.target.lon=lon; state.target.alt=alt;
+  state.target.az=p.az; state.target.el=Math.max(0,Math.min(135,p.el));
+  renderTarget();
+  if(sendCmd) send({cmd:'inject', lat, lon, alt});
+}
+const round1 = x => Math.round(x*10)/10;
+
+function renderTarget(){
+  const t=state.target;
+  $('az').value=t.az; $('azVal').textContent=fmt(t.az)+'°';
+  $('el').value=t.el; $('elVal').textContent=fmt(t.el)+'°';
+  $('tgtLat').value=fmt(t.lat,6); $('tgtLon').value=fmt(t.lon,6); $('tgtAlt').value=fmt(t.alt,0);
+  $('siAzT').textContent=fmt(t.az)+'°'; $('siElT').textContent=fmt(t.el)+'°';
+}
+
+// ===========================================================================
+//  Telemetry + pipeline render
+// ===========================================================================
+function renderTelemetry(d){
+  $('siAzC').textContent=fmt(d.az_c)+'°'; $('siElC').textContent=fmt(d.el_c)+'°';
+  $('tAz').textContent=fmt(d.az_t)+' / '+fmt(d.az_c);
+  $('tEl').textContent=fmt(d.el_t)+' / '+fmt(d.el_c);
+  $('tPid').textContent=fmt(d.pid,2);
+  $('tSps').textContent=fmt(d.sps,0); $('tStep').textContent='step '+(d.step??'—');
+  $('tEncDeg').textContent=fmt(d.enc_deg)+'°'; $('tEncRaw').textContent='raw '+(d.enc_raw??'—');
+  $('tSrv').textContent=(d.srv_us??'—'); $('tSrvDeg').textContent=fmt(d.el_c)+'°';
+  if(d.gnss_fix!==undefined){
+    $('tFix').textContent=FIX_LABELS[d.gnss_fix]||'?'; $('tSats').textContent=(d.gnss_sats??'—')+' sv';
+    $('tHacc').textContent=fmt((d.gnss_hacc_mm||0)/1000,1)+'m'; $('tHaccRaw').textContent='raw '+(d.gnss_hacc_mm??'—')+'mm';
+  }else{
+    $('tFix').textContent='—'; $('tSats').textContent='— sv'; $('tHacc').textContent='—'; $('tHaccRaw').textContent='raw —';
+  }
+  $('tSweep').textContent=d.sweep||'none';
+  $('tUp').textContent=fmt((d.up||0)/1000,1)+'s';
+}
+
+function renderPipeline(d){
+  $('pBLat').textContent=fmt(d.base_lat,5); $('pBLon').textContent=fmt(d.base_lon,5);
+  $('pBSrc').textContent=(d.base_src==='gnss')?'GNSS':'manual';
+  if(d.tgt_lat!==undefined){ $('pTLat').textContent=fmt(d.tgt_lat,5); $('pTLon').textContent=fmt(d.tgt_lon,5); $('pTAlt').textContent=fmt(d.tgt_alt,0)+'m'; }
+  $('pAz').textContent=fmt(d.az_t)+'°'; $('pEl').textContent=fmt(d.el_t)+'°';
+  $('pPid').textContent=fmt(d.pid,2); $('pSps').textContent=fmt(d.sps,0)+' sps';
+  $('pFbAz').textContent=fmt(d.az_c)+'°';
+  $('pFbEnc').textContent = d.enc ? (fmt(d.enc_deg)+'° ('+d.enc_raw+')') : 'sim '+fmt(d.pos)+'°';
+  $('pFbGnss').textContent = (d.gnss_fix!==undefined) ? ((FIX_LABELS[d.gnss_fix]||'?')+' / '+(d.gnss_sats||0)+'sv') : 'off';
+}
+
+// ===========================================================================
+//  Canvas sphere — drawn from state, fixed perspective, no interaction
+// ===========================================================================
+const scene = $('scene');
+const sctx = scene.getContext('2d');
+// fixed orthographic look-at camera
+const VIEW_AZ=235*D2R, VIEW_EL=26*D2R;
+const camDir={ x:Math.cos(VIEW_EL)*Math.sin(VIEW_AZ), y:Math.cos(VIEW_EL)*Math.cos(VIEW_AZ), z:Math.sin(VIEW_EL) };
+const fwd={x:-camDir.x,y:-camDir.y,z:-camDir.z};
+function cross(a,b){return{x:a.y*b.z-a.z*b.y,y:a.z*b.x-a.x*b.z,z:a.x*b.y-a.y*b.x};}
+function norm(v){const m=Math.hypot(v.x,v.y,v.z)||1;return{x:v.x/m,y:v.y/m,z:v.z/m};}
+const camRight=norm(cross(fwd,{x:0,y:0,z:1}));
+const camUp=cross(camRight,fwd);
+// a point at azimuth/elevation on the unit hemisphere → ENU vector
+function azElVec(azD,elD){const a=azD*D2R,e=elD*D2R,ce=Math.cos(e);return{x:ce*Math.sin(a),y:ce*Math.cos(a),z:Math.sin(e)};}
+let sceneGeom={cx:0,cy:0,R:1};
+function project(v){ // ENU vector (unit) → screen px
+  return { x:sceneGeom.cx + sceneGeom.R*(v.x*camRight.x+v.y*camRight.y+v.z*camRight.z),
+           y:sceneGeom.cy - sceneGeom.R*(v.x*camUp.x+v.y*camUp.y+v.z*camUp.z) };
+}
+function sizeScene(){
+  const r=scene.getBoundingClientRect(), dpr=Math.min(devicePixelRatio,2);
+  const w=Math.round(r.width*dpr), h=Math.round(r.height*dpr);
+  if(w!==scene.width||h!==scene.height){ scene.width=w; scene.height=h; } // avoid per-frame realloc
+  sctx.setTransform(dpr,0,0,dpr,0,0);
+  sceneGeom.cx=r.width/2; sceneGeom.cy=r.height*0.60; sceneGeom.R=Math.min(r.width,r.height)*0.42;
+}
+function strokePath(pts,style,width,dash){
+  sctx.beginPath(); sctx.lineWidth=width; sctx.strokeStyle=style; sctx.setLineDash(dash||[]);
+  pts.forEach((p,i)=> i?sctx.lineTo(p.x,p.y):sctx.moveTo(p.x,p.y));
+  sctx.stroke(); sctx.setLineDash([]);
+}
+function ring(elD){const a=[];for(let d=0;d<=360;d+=6)a.push(project(azElVec(d,elD)));return a;}
+function meridian(azD){const a=[];for(let e=0;e<=90;e+=6)a.push(project(azElVec(azD,e)));return a;}
+function drawScene(){
+  sizeScene();
+  sctx.clearRect(0,0,scene.width,scene.height);
+  // wireframe dome
+  for(const e of [0,30,60]) strokePath(ring(e), e===0?'#3a4a73':'#222c47', e===0?1.4:1);
+  for(let a=0;a<360;a+=45) strokePath(meridian(a), '#222c47', 1);
+  // compass labels
+  sctx.fillStyle='#94a3b8'; sctx.font='600 12px system-ui'; sctx.textAlign='center'; sctx.textBaseline='middle';
+  [['N',0],['E',90],['S',180],['W',270]].forEach(([t,az])=>{
+    const v=azElVec(az,0), p=project({x:v.x*1.12,y:v.y*1.12,z:0});
+    sctx.fillStyle=(t==='N')?'#f87171':'#94a3b8'; sctx.fillText(t,p.x,p.y);
+  });
+  const O=project({x:0,y:0,z:0});
+  // target: ground azimuth line + pointing line + dot
+  const tHoriz=project(azElVec(state.target.az,0));
+  const tPt=project(azElVec(state.target.az,state.target.el));
+  strokePath([O,tHoriz],'rgba(108,140,255,.45)',1.2,[4,4]);
+  strokePath([O,tPt],'#6c8cff',2);
+  dot(tPt,5,'#6c8cff');
+  // current pointing from telemetry
+  if(state.tel){
+    const cPt=project(azElVec(+state.tel.az_c||0,+state.tel.el_c||0));
+    strokePath([O,cPt],'#34d399',2);
+    dot(cPt,5,'#34d399');
+  }
+  // base marker
+  dot(O,4,'#cbd5e1');
+}
+function dot(p,r,c){sctx.beginPath();sctx.fillStyle=c;sctx.arc(p.x,p.y,r,0,Math.PI*2);sctx.fill();}
+function sceneLoop(){ drawScene(); requestAnimationFrame(sceneLoop); }
+
+// ===========================================================================
+//  Chart — az/el target vs current over time
+// ===========================================================================
+const chart=$('chart'), cctx=chart.getContext('2d');
+const HIST=300, hist={azT:[],azC:[],elT:[],elC:[],ts:[]};
+function pushChart(d){
+  const now=performance.now()/1000;
+  hist.azT.push(+d.az_t); hist.azC.push(+d.az_c); hist.elT.push(+d.el_t); hist.elC.push(+d.el_c); hist.ts.push(now);
+  if(hist.ts.length>HIST) for(const k in hist) hist[k].shift();
+  drawChart();
+}
+function drawChart(){
+  const r=chart.getBoundingClientRect(), dpr=Math.min(devicePixelRatio,2);
+  chart.width=r.width*dpr; chart.height=r.height*dpr; cctx.setTransform(dpr,0,0,dpr,0,0);
+  const W=r.width,H=r.height; cctx.clearRect(0,0,W,H);
+  cctx.strokeStyle='#1c2742'; cctx.lineWidth=1;
+  for(let i=0;i<5;i++){const y=H*i/4;cctx.beginPath();cctx.moveTo(0,y);cctx.lineTo(W,y);cctx.stroke();}
+  cctx.fillStyle='#64748b'; cctx.font='10px system-ui';
+  cctx.fillText('360°',2,11); cctx.fillText('0°',2,H-3);
+  if(hist.ts.length<2) return;
+  const t0=hist.ts[0], t1=hist.ts[hist.ts.length-1], span=Math.max(t1-t0,1);
+  const line=(arr,color,max)=>{cctx.beginPath();cctx.strokeStyle=color;cctx.lineWidth=1.5;
+    for(let i=0;i<arr.length;i++){const x=(hist.ts[i]-t0)/span*W, y=H-(arr[i]/max)*H; i?cctx.lineTo(x,y):cctx.moveTo(x,y);} cctx.stroke();};
+  line(hist.azT,'rgba(108,140,255,.5)',360); line(hist.azC,'#6c8cff',360);
+  line(hist.elT,'rgba(167,139,250,.5)',135); line(hist.elC,'#a78bfa',135);
+  const leg=[['Az tgt','rgba(108,140,255,.5)'],['Az cur','#6c8cff'],['El tgt','rgba(167,139,250,.5)'],['El cur','#a78bfa']];
+  let lx=W-210; cctx.font='10px system-ui';
+  leg.forEach(([t,c])=>{cctx.fillStyle=c;cctx.fillRect(lx,3,10,8);cctx.fillStyle='#94a3b8';cctx.fillText(t,lx+13,11);lx+=52;});
+}
+
+// ===========================================================================
+//  Trajectory simulator — repeatedly injects coordinates
+// ===========================================================================
+let simTimer=null, simT0=0;
+function startSim(){
+  if(state.phase!=='active'){ flashHint('Sim runs in the Active phase only.'); return; }
+  if(!state.connected){ flashHint('Connect before running the simulator.'); return; }
+  simT0=performance.now();
+  $('btnSim').textContent='■ Stop'; $('btnSim').className='btn btn-sm btn-red';
+  simTimer=setInterval(simTick,200);
+}
+function stopSim(){
+  if(!simTimer) return;
+  clearInterval(simTimer); simTimer=null;
+  $('btnSim').textContent='▶ Run'; $('btnSim').className='btn btn-sm btn-green';
+  $('simStatus').textContent='';
+}
+function simTick(){
+  const R=+$('simR').value, V=+$('simV').value, mode=$('simMode').value;
+  const t=(performance.now()-simT0)/1000;
+  let dx,dy;
+  if(mode==='circle'){ const a=t*V/R; dx=R*Math.sin(a); dy=R*Math.cos(a); }
+  else { const tau=t*V/R*0.5, s=Math.sin(tau),c=Math.cos(tau),den=1+s*s; dx=R*c/den; dy=R*s*c/den; }
+  const mPerLat=111320, mPerLon=111320*Math.cos(state.base.lat*D2R);
+  const lat=state.base.lat+dy/mPerLat, lon=state.base.lon+dx/mPerLon, alt=state.base.alt+200;
+  setTargetCoord(lat,lon,alt);
+  $('simStatus').textContent='t='+t.toFixed(1)+'s  Δ('+(dx/1000).toFixed(2)+'km E, '+(dy/1000).toFixed(2)+'km N)';
+}
+
+// ===========================================================================
+//  Mission phases
+// ===========================================================================
+function applyPhase(p){
+  state.phase=p; stopSim();
+  for(const [id,ph] of [['phSetup','setup'],['phStandby','standby'],['phActive','active']]){
+    const order={setup:0,standby:1,active:2};
+    const el=$(id); el.classList.remove('active','done');
+    if(ph===p) el.classList.add('active'); else if(order[ph]<order[p]) el.classList.add('done');
+  }
+  const setupOn=(p==='setup'), activeOn=(p==='active');
+  setCardEnabled('setupCard', setupOn);
+  setCardEnabled('controlCard', activeOn);
+  $('btnReconfigure').disabled = !(p==='standby');
+  $('btnArm').disabled = !(p==='setup') || !state.connected;
+  $('btnActive').disabled = !(p==='standby') || !state.connected;
+  $('btnStandDown').disabled = !(p==='active');
+  const hints={ setup:'Configure base, sensors, and PID, then Arm.',
+                standby:'Holding at home. Go Active to command targets.',
+                active:'Live tracking — drive Az/El, inject coordinates, or run a trajectory.' };
+  $('phaseHint').style.color='var(--text2)'; $('phaseHint').textContent=hints[p];
+}
+function setCardEnabled(id,on){ $(id).classList.toggle('dim',!on); }
+function flashHint(msg){ const h=$('phaseHint'); h.style.color='var(--yellow)'; h.textContent=msg;
+  setTimeout(()=>applyPhaseHintReset(),2500); }
+function applyPhaseHintReset(){ applyPhase(state.phase); }
+
+function arm(){ if($('btnArm').disabled) return; sendConfig(); send({cmd:'home'}); applyPhase('standby'); }
+function goActive(){ if($('btnActive').disabled) return; applyPhase('active'); }
+function standDown(){ if($('btnStandDown').disabled) return; stopSim(); send({cmd:'stop'}); send({cmd:'home'}); applyPhase('standby'); }
+function reconfigure(){ if($('btnReconfigure').disabled) return; applyPhase('setup'); }
+
+function sendConfig(){
+  send({cmd:'set_sensors', enc:$('chkEnc').checked, gps:$('chkGps').checked});
+  send({cmd:'set_base', lat:+$('baseLat').value, lon:+$('baseLon').value, alt:+$('baseAlt').value});
+  send({cmd:'set_pid', kp:+$('kp').value, ki:+$('ki').value, kd:+$('kd').value});
+}
+
+// ===========================================================================
+//  Serial log
+// ===========================================================================
+function log(msg,color){
+  const box=$('log'); const atBottom = box.scrollHeight-box.clientHeight <= box.scrollTop+12;
+  const d=document.createElement('div'); d.style.color=color||'var(--text2)'; d.textContent=msg;
+  box.appendChild(d); while(box.children.length>250) box.removeChild(box.firstChild);
+  if(atBottom) box.scrollTop=box.scrollHeight;
+}
+
+// ===========================================================================
+//  Wiring
+// ===========================================================================
+function wire(){
+  $('btnConnect').onclick = ()=> state.connected?disconnect():connect();
+  $('btnClearLog').onclick = ()=> $('log').textContent='';
+
+  // phase transitions
+  $('btnArm').onclick=arm; $('btnActive').onclick=goActive; $('btnStandDown').onclick=standDown; $('btnReconfigure').onclick=reconfigure;
+
+  // setup
+  $('btnSetBase').onclick = ()=>{ state.base.lat=+$('baseLat').value; state.base.lon=+$('baseLon').value; state.base.alt=+$('baseAlt').value;
+    send({cmd:'set_base', lat:state.base.lat, lon:state.base.lon, alt:state.base.alt}); };
+  $('chkEnc').onchange=$('chkGps').onchange = ()=> send({cmd:'set_sensors', enc:$('chkEnc').checked, gps:$('chkGps').checked});
+  const pid=()=>{ $('kpVal').textContent=(+$('kp').value).toFixed(2); $('kiVal').textContent=(+$('ki').value).toFixed(3);
+    $('kdVal').textContent=(+$('kd').value).toFixed(2); send({cmd:'set_pid',kp:+$('kp').value,ki:+$('ki').value,kd:+$('kd').value}); };
+  $('kp').oninput=$('ki').oninput=$('kd').oninput=pid;
+
+  // control — sliders & coordinate funnel through the target model
+  $('az').oninput = e=> setTargetAzEl(+e.target.value, state.target.el);
+  $('el').oninput = e=> setTargetAzEl(state.target.az, +e.target.value);
+  $('btnInject').onclick = ()=> setTargetCoord(+$('tgtLat').value, +$('tgtLon').value, +$('tgtAlt').value);
+  document.querySelectorAll('[data-preset]').forEach(b=> b.onclick=()=>preset(b.dataset.preset));
+  $('btnHome').onclick = ()=>{ send({cmd:'home'}); setTargetAzEl(0,0,{sendCmd:false}); };
+  $('btnStop').onclick = ()=> send({cmd:'stop'});
+  $('btnSim').onclick = ()=> simTimer?stopSim():startSim();
+
+  $('rangeTag').textContent='(@ '+SLANT_KM.toFixed(1)+' km slant)';
+}
+function preset(p){
+  const b=state.base, k=0.009;
+  const map={ n:[b.lat+k,b.lon,100], e:[b.lat,b.lon+k/Math.cos(b.lat*D2R),100],
+              s:[b.lat-k,b.lon,100], w:[b.lat,b.lon-k/Math.cos(b.lat*D2R),100], up:[b.lat,b.lon,1000] };
+  const [lat,lon,alt]=map[p]; setTargetCoord(lat,lon,alt);
+}
+
+// ===========================================================================
+//  Init
+// ===========================================================================
+wire();
+renderTarget();
+applyPhase('setup');
+sceneLoop();
+drawChart();
+window.addEventListener('resize', drawChart);
+log(navigator.serial ? '✓ Web Serial ready — Connect to begin.' : '⚠ Web Serial unavailable — use Chrome or Edge.',
+    navigator.serial?'var(--green)':'var(--yellow)');
+</script>
+</body>
+</html>

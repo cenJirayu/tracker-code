@@ -19,7 +19,12 @@ No unit test framework is wired up — `test/` contains only PlatformIO's placeh
 
 ## Web UI
 
-`hil_panel/index.html` is a self-contained Web Serial client. Open it directly in Chrome or Edge (Web Serial API is not available in Firefox/Safari). It speaks the JSON protocol defined in `src/main.cpp`.
+`hil_panel/` holds two self-contained Web Serial panels plus a launcher (`index.html`). Open any of them directly in Chrome or Edge (Web Serial API is not available in Firefox/Safari) — they have **no external dependencies** (no CDN scripts, no web fonts) and run fully offline from `file://`:
+
+- **`test_bench.html`** (Version A) — per-peripheral checkout with raw + interpreted readouts and a one-click self-test that fires every command and verifies the replies (incl. timed sweeps and error branches).
+- **`mission.html`** (Version B) — integrated Setup→Standby→Active mission console with a dependency-free Canvas-2D tracker sphere, trajectory simulator, and pipeline view. A single source-of-truth state keeps az / coordinate / sphere consistent.
+
+The JSON protocol both panels speak is the single source of truth in **`hil_panel/PROTOCOL.md`**; keep it, the firmware, and the panels in sync.
 
 ## Architecture
 
@@ -40,14 +45,13 @@ main.cpp  ──►  Actuators (lib/ActuatorControl)
                   ├── AS5048A via SPI (encoder)  → with simulated-encoder fallback
                   └── ESP-IDF MCPWM (tilt servo) → legacy driver/mcpwm.h API
            ──►  GNSSManager (lib/GNSSManager)    → u-blox SAM-M10Q via I2C
-           ──►  MagManager  (lib/MagManager)     → MMC5983MA via I2C (shared bus)
 ```
 
 Pan control has two parallel update paths: `updatePan()` reads the real AS5048A; `updatePanWithPosition(deg)` accepts an externally supplied angle so the loop can run when the encoder isn't present. `main.cpp` picks between them each PID tick based on the runtime `hasEncoder` flag. The simulated path reads back the stepper's commanded position via `getStepperPositionDeg()`, which is exactly what HIL mode uses by default.
 
 The tilt servo is open-loop. Telemetry reports `el_c == el_t` by design — there is no servo feedback path.
 
-**MagManager** wraps the MMC5983MA in 10 Hz continuous mode. `update()` calls `readFieldsXYZ` (non-blocking register read) and computes True North heading via `atan2(X, -Y) + MAGNETIC_DECLINATION_DEG`. Only called when `magHardwareOk && hasMagnetometer`; result appears in telemetry as `mag_hdg`.
+> The MMC5983MA magnetometer — and its `MagManager` library, `MAGNETIC_DECLINATION_DEG`, and `Navigation::computeTrueHeading` — has been **removed from this project**. The live sensors are the AS5048A encoder and the u-blox GNSS only.
 
 ### Navigation pipeline (`lib/Navigation`)
 
@@ -55,22 +59,26 @@ Target ingestion via the `inject` command runs the full **WGS84 → ECEF → ENU
 
 ### Serial protocol (newline-delimited JSON, 115200 baud)
 
+The full schema lives in **`hil_panel/PROTOCOL.md`** — that file is authoritative; this is a summary.
+
 Inbound `cmd` values handled in `processCommand`:
 - `direct` — `{az, el}` (either or both)
 - `inject` — `{lat, lon, alt}` → routed through Navigation
 - `set_base` — overrides base station for `inject`
 - `set_pid` — `{kp, ki, kd}`
-- `set_sensors` — `{enc, mag, gps}` toggles which sensors the firmware *pretends* to have
+- `set_sensors` — `{enc, gps}` toggles which sensors the firmware uses as live sources
 - `home`, `sweep_az`, `sweep_el`, `stop`
 
 Outbound message types: `ready` (one-shot on boot), `tel` (10 Hz, `TELEMETRY_INTERVAL_MS`), `ack`, `err`. Telemetry numeric fields use `serialized(String(x, n))` to fix decimal precision — keep this pattern if you add new float fields.
 
-Additional `tel` fields (conditional):
-- `mag_hdg` — True North heading in degrees; present when `magHardwareOk && hasMagnetometer`
-- `gnss_fix`, `gnss_sats`, `gnss_hacc` — present when `gnssHardwareOk`
-- `tgt_lat`, `tgt_lon`, `tgt_alt` — last injected target; present after first `inject` command
+Telemetry emits each sensor's **raw** wire value beside the actuator state so the panels can show raw + interpreted:
+- pan stepper: `pid`, `sps`, `step` (raw count), `pos` (interpreted deg)
+- encoder: `enc_raw` (14-bit counts), `enc_deg` (interpreted) — always present (a real SPI read each tick)
+- tilt servo: `srv_us` (raw commanded pulse width)
+- GNSS (when `gnssHardwareOk`): `gnss_fix`, `gnss_sats`, `gnss_lat_e7`, `gnss_lon_e7`, `gnss_alt_mm`, `gnss_hacc_mm` (all raw integers; panels interpret)
+- `base_lat/lon/alt`, `base_src`; `tgt_lat/lon/alt` after the first `inject`
 
-`ready` message also carries `mag_hw` (bool) and `gps_hw` (bool) to tell the dashboard which hardware was found at boot.
+`ready` carries `gps_hw` (bool) to tell the dashboard whether the GNSS module answered at boot.
 
 ### Loop timing
 

@@ -30,18 +30,9 @@ static constexpr int  UART_RX_PIN   = 44;
 static constexpr int  UART_TX_PIN   = 43;
 static constexpr long UART_BAUD     = 115200;
 
-// --- I2C Bus (GPS + Magnetometer) ---
+// --- I2C Bus (GPS) ---
 static constexpr int I2C_SDA_PIN    = 8;
 static constexpr int I2C_SCL_PIN    = 9;
-
-// ============================================================================
-//  SITE-SPECIFIC CONSTANTS
-// ============================================================================
-
-/// Local magnetic declination in degrees (east-positive).
-/// Look up your launch site at:
-///   https://www.ngdc.noaa.gov/geomag/calculators/magcalc.shtml
-static constexpr double MAGNETIC_DECLINATION_DEG = 0.5;
 
 // ============================================================================
 //  MECHANICAL CONSTANTS

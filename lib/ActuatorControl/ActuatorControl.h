@@ -50,6 +50,11 @@ public:
     float getStepperSpeed();
     float getTargetAzimuth() const;
 
+    // ---- Raw debug accessors (values straight off the actuators) ----
+    uint16_t readEncoderRaw();        // AS5048A 14-bit angle counts [0,16383]
+    long     getStepCount();          // absolute stepper step count
+    uint32_t getTiltPulseUs() const;  // last commanded servo pulse width (µs)
+
     // ---- Tilt (Elevation) ----
     void  setTiltAngle(float elevDeg);
 
@@ -65,6 +70,7 @@ private:
     float  _prevError;
     float  _lastPidOutput;
     float  _lastCommandedSPS;
+    uint32_t _lastTiltPulseUs;
     unsigned long _lastPidUs;
 
     // AS5048A helpers

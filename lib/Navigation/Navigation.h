@@ -49,12 +49,4 @@ Vec3d ecefToENU(const Vec3d& dECEF, double refLatDeg, double refLonDeg);
 PointingAngles computePointing(double baseLat, double baseLon, double baseAlt,
                                 double tgtLat,  double tgtLon,  double tgtAlt);
 
-/// Compute magnetic heading from raw magnetometer X/Y readings,
-/// applying magnetic declination to return True North heading.
-/// @param magX         Calibrated magnetometer X axis (µT or Gauss — units cancel)
-/// @param magY         Calibrated magnetometer Y axis
-/// @param declinationDeg  Local magnetic declination (east-positive, degrees)
-/// @return Heading in degrees [0, 360) from True North, clockwise
-double computeTrueHeading(double magX, double magY, double declinationDeg);
-
 #endif // NAVIGATION_H

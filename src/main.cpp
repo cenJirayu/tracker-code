@@ -2,12 +2,12 @@
 // main.cpp — HIL (Hardware-In-the-Loop) Actuator Test Harness
 // Cursr-V Antenna Tracker
 //
-// Accepts JSON commands over USB Serial to drive actuators.
-// Sensors (AS5048A encoder, MMC5983MA magnetometer, u-blox GNSS) are optional
-// and toggleable at runtime via set_sensors.
-// Designed to work with the companion Web UI (hil_panel/index.html).
+// Accepts JSON commands over USB Serial to drive the pan/tilt actuators.
+// Sensors (AS5048A encoder, u-blox GNSS) are optional and toggleable at
+// runtime via set_sensors. Telemetry reports each sensor's raw wire value so
+// the companion panels can show raw + interpreted data side by side.
 //
-// Protocol:
+// Protocol is documented in hil_panel/PROTOCOL.md.
 //   IN  → {"cmd":"direct","az":45.0,"el":30.0}   (newline-terminated JSON)
 //   OUT ← {"t":"tel","az_t":45.0,"el_t":30.0,...} (10 Hz telemetry)
 // ============================================================================
@@ -17,26 +17,22 @@
 #include "ActuatorControl.h"
 #include "Navigation.h"
 #include "GNSSManager.h"
-#include "MagManager.h"
 
 // ============================================================================
 //  Global Objects
 // ============================================================================
 Actuators   actuators;
 GNSSManager gnss;
-MagManager  mag;
 
 // ============================================================================
 //  Sensor Availability Flags (toggled via Web UI at runtime)
 // ============================================================================
-bool hasEncoder      = false;   // AS5048A magnetic encoder
-bool hasMagnetometer = false;   // MMC5983MA magnetometer
-bool hasGNSS         = false;   // u-blox GNSS module
+bool hasEncoder = false;   // AS5048A magnetic encoder is the pan feedback source
+bool hasGNSS    = false;   // u-blox GNSS drives the base station
 
-// True when the respective hardware responded on begin(); independent of
-// the runtime toggle (hasMagnetometer / hasGNSS).
+// True when the GNSS hardware responded on begin(); independent of the runtime
+// toggle (hasGNSS).
 bool gnssHardwareOk = false;
-bool magHardwareOk  = false;
 
 // ============================================================================
 //  Base Station Position (manual entry or GNSS)
@@ -143,14 +139,6 @@ void setup() {
         Serial.println("HIL: GNSS not found on I2C.");
     }
 
-    // ---- Magnetometer (MMC5983MA, I2C shared bus) ----
-    magHardwareOk = mag.begin();
-    if (magHardwareOk) {
-        Serial.println("HIL: Magnetometer OK — 10 Hz continuous mode.");
-    } else {
-        Serial.println("HIL: Magnetometer not found on I2C.");
-    }
-
     // Reserve buffer for serial input
     serialBuffer.reserve(256);
 
@@ -183,14 +171,12 @@ void setup() {
     // Ready message
     JsonDocument readyDoc;
     readyDoc["t"]      = "ready";
-    readyDoc["ver"]    = "1.0.0";
+    readyDoc["ver"]    = "2.0.0";
     readyDoc["board"]  = "ESP32-S3";
     readyDoc["motor"]  = "NEMA17/TB6600";
     readyDoc["servo"]  = "DS51150/300Hz";
     readyDoc["enc"]    = hasEncoder;
-    readyDoc["mag"]    = hasMagnetometer;
     readyDoc["gps"]    = hasGNSS;
-    readyDoc["mag_hw"] = magHardwareOk;
     readyDoc["gps_hw"] = gnssHardwareOk;
     serializeJson(readyDoc, Serial);
     Serial.println();
@@ -228,13 +214,10 @@ void loop() {
     // 5. Stepper pulse generation (non-blocking, call every loop)
     actuators.runPan();
 
-    // 6. Send telemetry at 10 Hz; update mag heading just before emitting
+    // 6. Send telemetry at 10 Hz
     unsigned long nowMs = millis();
     if (nowMs - lastTelemetryMs >= TELEMETRY_INTERVAL_MS) {
         lastTelemetryMs = nowMs;
-        if (magHardwareOk && hasMagnetometer) {
-            mag.update();
-        }
         sendTelemetry();
     }
 }
@@ -276,8 +259,7 @@ void processCommand(JsonDocument& doc) {
 
     // ---- set_sensors: toggle sensor availability ----
     if (strcmp(cmd, "set_sensors") == 0) {
-        if (doc["enc"].is<bool>()) hasEncoder      = doc["enc"];
-        if (doc["mag"].is<bool>()) hasMagnetometer = doc["mag"];
+        if (doc["enc"].is<bool>()) hasEncoder = doc["enc"];
         if (doc["gps"].is<bool>()) {
             bool newGNSS = doc["gps"];
             if (newGNSS && !hasGNSS && gnssHardwareOk && gnss.isValid()) {
@@ -290,7 +272,6 @@ void processCommand(JsonDocument& doc) {
 
         JsonDocument ack;
         ack["enc"] = hasEncoder;
-        ack["mag"] = hasMagnetometer;
         ack["gps"] = hasGNSS;
         sendAck("set_sensors", &ack);
     }
@@ -463,24 +444,17 @@ void updatePanAxis() {
 
 // ============================================================================
 //  Telemetry Output (JSON, 10 Hz)
+//
+//  Emits raw + interpreted values per sensor (see hil_panel/PROTOCOL.md).
 // ============================================================================
 void sendTelemetry() {
-    float currentAz = hasEncoder
-        ? actuators.getPanAngleDeg()
-        : actuators.getStepperPositionDeg();
-
-    JsonDocument doc;
-    doc["t"]    = "tel";
-    doc["az_t"] = serialized(String(targetAz,  1));
-    doc["el_t"] = serialized(String(targetEl,  1));
-    doc["az_c"] = serialized(String(currentAz, 1));
-    doc["el_c"] = serialized(String(targetEl,  1));  // servo is open-loop
-    doc["pid"]  = serialized(String(actuators.getPidOutput(),    2));
-    doc["spd"]  = serialized(String(actuators.getStepperSpeed(), 1));
-    doc["up"]   = millis();
-    doc["enc"]  = hasEncoder;
-    doc["mag"]  = hasMagnetometer;
-    doc["gps"]  = hasGNSS;
+    // One encoder read per tick; az_c follows the encoder when it is the
+    // active source, else the simulated stepper position. Keeping az_c tied
+    // to the same read means enc_deg and az_c never disagree.
+    uint16_t encRaw  = actuators.readEncoderRaw();
+    float    encDeg  = encRaw * (360.0f / 16384.0f);
+    float    stepPos = actuators.getStepperPositionDeg();
+    float    currentAz = hasEncoder ? encDeg : stepPos;
 
     const char* sweepStr = "none";
     switch (sweepState) {
@@ -489,7 +463,42 @@ void sendTelemetry() {
         case SWEEP_EL_REV: sweepStr = "el"; break;
         default: break;
     }
+
+    JsonDocument doc;
+    doc["t"]  = "tel";
+    doc["up"] = millis();
+
+    // Pointing
+    doc["az_t"]  = serialized(String(targetAz,  1));
+    doc["az_c"]  = serialized(String(currentAz, 1));
+    doc["el_t"]  = serialized(String(targetEl,  1));
+    doc["el_c"]  = serialized(String(targetEl,  1));  // servo is open-loop
     doc["sweep"] = sweepStr;
+
+    // Pan stepper — raw control signal + interpreted position
+    doc["pid"]  = serialized(String(actuators.getPidOutput(),    2));
+    doc["sps"]  = serialized(String(actuators.getStepperSpeed(), 1));
+    doc["step"] = actuators.getStepCount();
+    doc["pos"]  = serialized(String(stepPos, 1));
+
+    // Encoder (AS5048A) — raw counts + interpreted degrees
+    doc["enc"]     = hasEncoder;
+    doc["enc_raw"] = encRaw;
+    doc["enc_deg"] = serialized(String(encDeg, 1));
+
+    // Tilt servo — raw commanded pulse width (interpreted angle == el_c)
+    doc["srv_us"] = actuators.getTiltPulseUs();
+
+    // GNSS — raw wire integers (the panel interprets fix label / deg / metres)
+    doc["gps"] = hasGNSS;
+    if (gnssHardwareOk) {
+        doc["gnss_fix"]     = gnss.getFixType();
+        doc["gnss_sats"]    = gnss.getSatsUsed();
+        doc["gnss_lat_e7"]  = gnss.getLatRaw();
+        doc["gnss_lon_e7"]  = gnss.getLonRaw();
+        doc["gnss_alt_mm"]  = gnss.getAltRawMM();
+        doc["gnss_hacc_mm"] = gnss.getHaccRawMM();
+    }
 
     // Base station position and source
     doc["base_lat"] = serialized(String(baseLat, 6));
@@ -497,19 +506,7 @@ void sendTelemetry() {
     doc["base_alt"] = serialized(String((float)baseAlt, 1));
     doc["base_src"] = (hasGNSS && gnssHardwareOk) ? "gnss" : "manual";
 
-    // GNSS fix quality (always reported when hardware is present)
-    if (gnssHardwareOk) {
-        doc["gnss_fix"]  = gnss.getFixType();
-        doc["gnss_sats"] = gnss.getSatsUsed();
-        doc["gnss_hacc"] = serialized(String(gnss.getHorizAccM(), 1));
-    }
-
-    // Magnetometer heading (when hardware is present and user has enabled it)
-    if (magHardwareOk && hasMagnetometer) {
-        doc["mag_hdg"] = serialized(String(mag.getHeadingDeg(), 1));
-    }
-
-    // Last injected target — enables pipeline display on dashboard
+    // Last injected target — enables pipeline display on the dashboard
     if (hasLastInject) {
         doc["tgt_lat"] = serialized(String(lastTgtLat, 6));
         doc["tgt_lon"] = serialized(String(lastTgtLon, 6));

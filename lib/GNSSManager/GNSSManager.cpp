@@ -58,10 +58,17 @@ bool GNSSManager::update()
 
     // Always update position fields so the caller can inspect raw data even
     // during a degraded fix; isValid() guards production use.
-    _fix.lat       = _gnss.getLatitude()  * 1e-7;   // degrees
-    _fix.lon       = _gnss.getLongitude() * 1e-7;   // degrees
-    _fix.altMSL    = _gnss.getAltitudeMSL() * 1e-3f; // mm → m
-    _fix.horizAccM = _gnss.getHorizontalAccEst() * 1e-3f; // mm → m
+    // Read each native integer once, then derive engineering units so callers
+    // can show the raw wire value beside its interpretation.
+    _fix.latRaw    = _gnss.getLatitude();           // 1e-7 deg
+    _fix.lonRaw    = _gnss.getLongitude();           // 1e-7 deg
+    _fix.altRawMM  = _gnss.getAltitudeMSL();         // mm MSL
+    _fix.hAccRawMM = _gnss.getHorizontalAccEst();    // mm
+
+    _fix.lat       = _fix.latRaw    * 1e-7;   // degrees
+    _fix.lon       = _fix.lonRaw    * 1e-7;   // degrees
+    _fix.altMSL    = _fix.altRawMM  * 1e-3f;  // mm → m
+    _fix.horizAccM = _fix.hAccRawMM * 1e-3f;  // mm → m
 
     if (_fix.valid) {
         _lastFixMs   = millis();

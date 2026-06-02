@@ -95,21 +95,3 @@ PointingAngles computePointing(double baseLat, double baseLon, double baseAlt,
 
     return pa;
 }
-
-// --------------------------------------------------------------------------
-// Compute True North heading from magnetometer XY + declination
-// --------------------------------------------------------------------------
-double computeTrueHeading(double magX, double magY, double declinationDeg) {
-    // atan2(X, -Y) gives heading from magnetic north
-    // (sensor Y axis points north when heading = 0)
-    double headingDeg = atan2(magX, -magY) * RAD2DEG;
-
-    // Apply magnetic declination to get True North
-    headingDeg += declinationDeg;
-
-    // Normalise to [0, 360)
-    if (headingDeg < 0.0)   headingDeg += 360.0;
-    if (headingDeg >= 360.0) headingDeg -= 360.0;
-
-    return headingDeg;
-}

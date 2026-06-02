@@ -27,6 +27,12 @@ struct GNSSFix {
     uint8_t  fixType;       // 0=none,2=2D,3=3D,4=GNSS+DR
     uint8_t  satsUsed;
     bool     valid;         // fixType ≥ 2 AND gnssFixOK bit set
+
+    // Native wire integers, captured at parse time (for raw debug display).
+    int32_t  latRaw;        // 1e-7 deg
+    int32_t  lonRaw;        // 1e-7 deg
+    int32_t  altRawMM;      // mm MSL
+    uint32_t hAccRawMM;     // mm
 };
 
 // --------------------------------------------------------------------------
@@ -54,6 +60,12 @@ public:
     double   getLon()         const { return _fix.lon; }
     float    getAlt()         const { return _fix.altMSL; }
     float    getHorizAccM()   const { return _fix.horizAccM; }
+
+    // ---- Raw wire integers (for raw + interpreted debug display) ----
+    int32_t  getLatRaw()      const { return _fix.latRaw; }
+    int32_t  getLonRaw()      const { return _fix.lonRaw; }
+    int32_t  getAltRawMM()    const { return _fix.altRawMM; }
+    uint32_t getHaccRawMM()   const { return _fix.hAccRawMM; }
 
     /// Fill lat/lon/alt in one call; returns isValid().
     bool getLocation(double& lat, double& lon, float& alt) const;

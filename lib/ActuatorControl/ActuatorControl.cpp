@@ -21,6 +21,7 @@ Actuators::Actuators()
     , _prevError(0.0f)
     , _lastPidOutput(0.0f)
     , _lastCommandedSPS(0.0f)
+    , _lastTiltPulseUs(SERVO_MIN_PULSE_US)
     , _lastPidUs(0)
 {}
 
@@ -74,12 +75,15 @@ void Actuators::setPanNorthOffset(double northHeadingDeg) {
 // ============================================================================
 //  AS5048A Encoder Read
 // ============================================================================
-float Actuators::readEncoderDeg() {
+uint16_t Actuators::readEncoderRaw() {
     _spiTransfer16(_buildReadCommand(AS5048A_CMD_ANGLE));
     delayMicroseconds(1);
     uint16_t raw = _spiTransfer16(0x0000);
-    uint16_t angle14 = raw & 0x3FFF;
-    return (float)angle14 * (360.0f / 16384.0f);
+    return raw & 0x3FFF;   // 14-bit angle counts
+}
+
+float Actuators::readEncoderDeg() {
+    return (float)readEncoderRaw() * (360.0f / 16384.0f);
 }
 
 uint16_t Actuators::_spiTransfer16(uint16_t cmd) {
@@ -220,6 +224,7 @@ void Actuators::setTiltAngle(float elevDeg) {
         (long)SERVO_MAX_PULSE_US
     );
 
+    _lastTiltPulseUs = pulseUs;
     mcpwm_set_duty_in_us(SERVO_MCPWM_UNIT, SERVO_MCPWM_TIMER,
                           MCPWM_GEN_A, pulseUs);
 }
@@ -251,4 +256,12 @@ float Actuators::getStepperSpeed() {
 
 float Actuators::getTargetAzimuth() const {
     return _targetAzDeg;
+}
+
+long Actuators::getStepCount() {
+    return _stepper.currentPosition();
+}
+
+uint32_t Actuators::getTiltPulseUs() const {
+    return _lastTiltPulseUs;
 }
