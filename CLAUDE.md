@@ -23,28 +23,31 @@ No unit test framework is wired up — `test/` contains only PlatformIO's placeh
 
 ## Architecture
 
-### Compile-time hardware selection (`include/config.h`)
+### Hardware configuration (`include/config.h`)
 
-This is the single most important file. Two `#define` switches select the entire hardware stack at build time:
+Fixed hardware stack — no compile-time variant selection remains:
 
-- `USE_TB6600` vs `USE_ULN2003` → which stepper driver / motor (NEMA17 or 28BYJ-48), which pins, gear ratio, steps-per-rev, and PID gains.
-- `USE_DS51150` vs `USE_SG90` → which tilt servo, PWM frequency, pulse range, and elevation travel limits.
+- **Pan**: NEMA17 stepper via TB6600 (DRIVER mode), AS5048A encoder on SPI
+- **Tilt**: DS51150 servo at 300 Hz via MCPWM, 2:1 belt reduction → 135° physical travel
 
-Only one of each pair must be active. Switching variants is a recompile, not a runtime toggle. Pin maps, mechanical constants, and PID gains inside `config.h` are gated on these macros, and the constructor initializer list in `ActuatorControl.cpp` chooses a different `AccelStepper` wiring mode accordingly.
+All pin maps, mechanical constants, and PID gains live in `config.h`. No ifdefs gate them.
 
 ### Layered actuator stack
 
 ```
 main.cpp  ──►  Actuators (lib/ActuatorControl)
-                  │
                   ├── AccelStepper (pan)         → PID speed control, anti-windup
                   ├── AS5048A via SPI (encoder)  → with simulated-encoder fallback
                   └── ESP-IDF MCPWM (tilt servo) → legacy driver/mcpwm.h API
+           ──►  GNSSManager (lib/GNSSManager)    → u-blox SAM-M10Q via I2C
+           ──►  MagManager  (lib/MagManager)     → MMC5983MA via I2C (shared bus)
 ```
 
 Pan control has two parallel update paths: `updatePan()` reads the real AS5048A; `updatePanWithPosition(deg)` accepts an externally supplied angle so the loop can run when the encoder isn't present. `main.cpp` picks between them each PID tick based on the runtime `hasEncoder` flag. The simulated path reads back the stepper's commanded position via `getStepperPositionDeg()`, which is exactly what HIL mode uses by default.
 
 The tilt servo is open-loop. Telemetry reports `el_c == el_t` by design — there is no servo feedback path.
+
+**MagManager** wraps the MMC5983MA in 10 Hz continuous mode. `update()` calls `readFieldsXYZ` (non-blocking register read) and computes True North heading via `atan2(X, -Y) + MAGNETIC_DECLINATION_DEG`. Only called when `magHardwareOk && hasMagnetometer`; result appears in telemetry as `mag_hdg`.
 
 ### Navigation pipeline (`lib/Navigation`)
 
@@ -61,6 +64,13 @@ Inbound `cmd` values handled in `processCommand`:
 - `home`, `sweep_az`, `sweep_el`, `stop`
 
 Outbound message types: `ready` (one-shot on boot), `tel` (10 Hz, `TELEMETRY_INTERVAL_MS`), `ack`, `err`. Telemetry numeric fields use `serialized(String(x, n))` to fix decimal precision — keep this pattern if you add new float fields.
+
+Additional `tel` fields (conditional):
+- `mag_hdg` — True North heading in degrees; present when `magHardwareOk && hasMagnetometer`
+- `gnss_fix`, `gnss_sats`, `gnss_hacc` — present when `gnssHardwareOk`
+- `tgt_lat`, `tgt_lon`, `tgt_alt` — last injected target; present after first `inject` command
+
+`ready` message also carries `mag_hw` (bool) and `gps_hw` (bool) to tell the dashboard which hardware was found at boot.
 
 ### Loop timing
 

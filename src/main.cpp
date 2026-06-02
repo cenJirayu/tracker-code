@@ -3,7 +3,8 @@
 // Cursr-V Antenna Tracker
 //
 // Accepts JSON commands over USB Serial to drive actuators.
-// Sensors (AS5048A, Magnetometer, GNSS) are optional and toggleable.
+// Sensors (AS5048A encoder, MMC5983MA magnetometer, u-blox GNSS) are optional
+// and toggleable at runtime via set_sensors.
 // Designed to work with the companion Web UI (hil_panel/index.html).
 //
 // Protocol:
@@ -16,12 +17,14 @@
 #include "ActuatorControl.h"
 #include "Navigation.h"
 #include "GNSSManager.h"
+#include "MagManager.h"
 
 // ============================================================================
 //  Global Objects
 // ============================================================================
 Actuators   actuators;
 GNSSManager gnss;
+MagManager  mag;
 
 // ============================================================================
 //  Sensor Availability Flags (toggled via Web UI at runtime)
@@ -30,8 +33,10 @@ bool hasEncoder      = false;   // AS5048A magnetic encoder
 bool hasMagnetometer = false;   // MMC5983MA magnetometer
 bool hasGNSS         = false;   // u-blox GNSS module
 
-// True when gnss.begin() succeeded; independent of the runtime toggle.
-bool gnssHardwareOk  = false;
+// True when the respective hardware responded on begin(); independent of
+// the runtime toggle (hasMagnetometer / hasGNSS).
+bool gnssHardwareOk = false;
+bool magHardwareOk  = false;
 
 // ============================================================================
 //  Base Station Position (manual entry or GNSS)
@@ -46,14 +51,20 @@ double baseAlt = HIL_DEFAULT_BASE_ALT;
 float targetAz = 0.0f;
 float targetEl = 0.0f;
 
+// Last injected target coordinates — echoed in telemetry for pipeline display.
+double lastTgtLat = 0.0;
+double lastTgtLon = 0.0;
+double lastTgtAlt = 0.0;
+bool   hasLastInject = false;
+
 // ============================================================================
 //  Sweep State Machine
 // ============================================================================
 enum SweepState : uint8_t {
     SWEEP_NONE,
-    SWEEP_AZ_FWD,      // 0 → 360
-    SWEEP_EL_FWD,      // 0 → 135
-    SWEEP_EL_REV        // 135 → 0
+    SWEEP_AZ_FWD,   // 0 → 360
+    SWEEP_EL_FWD,   // 0 → 135
+    SWEEP_EL_REV    // 135 → 0
 };
 
 SweepState sweepState   = SWEEP_NONE;
@@ -89,11 +100,11 @@ void setup() {
     Serial.begin(115200);
     while (!Serial && millis() < 3000) { /* wait for USB CDC */ }
 
-    // Initialize actuators (servo + stepper + encoder SPI)
-    // Encoder SPI init is harmless even when hardware is absent
+    // Initialize actuators (servo + stepper + encoder SPI).
+    // Encoder SPI init is harmless even when hardware is absent.
     actuators.begin();
 
-    // Initialize GNSS on I2C and wait for a precise fix to set base station.
+    // ---- GNSS (u-blox SAM-M10Q, I2C) ----
     gnssHardwareOk = gnss.begin();
     if (gnssHardwareOk) {
         Serial.println("HIL: GNSS OK — waiting for precise fix...");
@@ -132,11 +143,18 @@ void setup() {
         Serial.println("HIL: GNSS not found on I2C.");
     }
 
+    // ---- Magnetometer (MMC5983MA, I2C shared bus) ----
+    magHardwareOk = mag.begin();
+    if (magHardwareOk) {
+        Serial.println("HIL: Magnetometer OK — 10 Hz continuous mode.");
+    } else {
+        Serial.println("HIL: Magnetometer not found on I2C.");
+    }
+
     // Reserve buffer for serial input
     serialBuffer.reserve(256);
 
     // ---- Startup Self-Test ----
-    // Briefly move both actuators to confirm hardware is working
     Serial.println("HIL: Running startup self-test...");
 
     // Test servo: move to 45°, wait, return to 0°
@@ -145,15 +163,13 @@ void setup() {
     actuators.setTiltAngle(0.0f);
     delay(300);
 
-    // Test stepper: rotate a small amount forward, then back
-    // Directly step a few pulses to verify motor responds
-    actuators.setTargetAzimuth(15.0f);  // target 15°
+    // Test stepper: rotate forward 15°, then return
+    actuators.setTargetAzimuth(15.0f);
     for (int i = 0; i < 500; i++) {
-        actuators.updatePanWithPosition(0.0f);  // PID thinks we're at 0°
+        actuators.updatePanWithPosition(0.0f);
         actuators.runPan();
         delayMicroseconds(500);
     }
-    // Return to 0
     actuators.setTargetAzimuth(0.0f);
     for (int i = 0; i < 500; i++) {
         float pos = actuators.getStepperPositionDeg();
@@ -166,22 +182,16 @@ void setup() {
 
     // Ready message
     JsonDocument readyDoc;
-    readyDoc["t"]       = "ready";
-    readyDoc["version"] = "1.0.0";
-    readyDoc["board"]   = "ESP32-S3";
-#ifdef USE_ULN2003
-    readyDoc["motor"]   = "28BYJ-48/ULN2003";
-#else
-    readyDoc["motor"]   = "NEMA17/TB6600";
-#endif
-#ifdef USE_SG90
-    readyDoc["servo"]   = "SG90/50Hz";
-#else
-    readyDoc["servo"]   = "DS51150/300Hz";
-#endif
-    readyDoc["enc"]     = hasEncoder;
-    readyDoc["mag"]     = hasMagnetometer;
-    readyDoc["gps"]     = hasGNSS;
+    readyDoc["t"]      = "ready";
+    readyDoc["ver"]    = "1.0.0";
+    readyDoc["board"]  = "ESP32-S3";
+    readyDoc["motor"]  = "NEMA17/TB6600";
+    readyDoc["servo"]  = "DS51150/300Hz";
+    readyDoc["enc"]    = hasEncoder;
+    readyDoc["mag"]    = hasMagnetometer;
+    readyDoc["gps"]    = hasGNSS;
+    readyDoc["mag_hw"] = magHardwareOk;
+    readyDoc["gps_hw"] = gnssHardwareOk;
     serializeJson(readyDoc, Serial);
     Serial.println();
 
@@ -195,7 +205,7 @@ void loop() {
     // 1. Parse incoming JSON commands (non-blocking)
     parseSerialJSON();
 
-    // 1a. Poll GNSS and update base station when enabled
+    // 2. Poll GNSS and update base station when enabled
     if (gnssHardwareOk) {
         gnss.update();
         if (hasGNSS && gnss.isValid()) {
@@ -205,23 +215,26 @@ void loop() {
         }
     }
 
-    // 2. Update sweep animation if active
+    // 3. Update sweep animation if active
     updateSweep();
 
-    // 3. PID update at 200 Hz (rate-limited)
+    // 4. PID update at 200 Hz (rate-limited)
     unsigned long nowUs = micros();
     if (nowUs - lastPidUs >= PID_INTERVAL_US) {
         lastPidUs = nowUs;
         updatePanAxis();
     }
 
-    // 4. Stepper pulse generation (non-blocking, call every loop)
+    // 5. Stepper pulse generation (non-blocking, call every loop)
     actuators.runPan();
 
-    // 5. Send telemetry at 10 Hz
+    // 6. Send telemetry at 10 Hz; update mag heading just before emitting
     unsigned long nowMs = millis();
     if (nowMs - lastTelemetryMs >= TELEMETRY_INTERVAL_MS) {
         lastTelemetryMs = nowMs;
+        if (magHardwareOk && hasMagnetometer) {
+            mag.update();
+        }
         sendTelemetry();
     }
 }
@@ -267,7 +280,6 @@ void processCommand(JsonDocument& doc) {
         if (doc["mag"].is<bool>()) hasMagnetometer = doc["mag"];
         if (doc["gps"].is<bool>()) {
             bool newGNSS = doc["gps"];
-            // Apply current GNSS fix immediately when enabling
             if (newGNSS && !hasGNSS && gnssHardwareOk && gnss.isValid()) {
                 baseLat = gnss.getLat();
                 baseLon = gnss.getLon();
@@ -292,8 +304,7 @@ void processCommand(JsonDocument& doc) {
             targetEl = doc["el"].as<float>();
             actuators.setTiltAngle(targetEl);
         }
-        
-        sweepState = SWEEP_NONE; // cancel any sweep
+        sweepState = SWEEP_NONE;
 
         JsonDocument ack;
         ack["az"] = targetAz;
@@ -320,6 +331,12 @@ void processCommand(JsonDocument& doc) {
         actuators.setTargetAzimuth(targetAz);
         actuators.setTiltAngle(targetEl);
         sweepState = SWEEP_NONE;
+
+        // Track last injected target for pipeline telemetry
+        lastTgtLat   = tgtLat;
+        lastTgtLon   = tgtLon;
+        lastTgtAlt   = tgtAlt;
+        hasLastInject = true;
 
         JsonDocument ack;
         ack["az"] = targetAz;
@@ -384,7 +401,6 @@ void processCommand(JsonDocument& doc) {
     // ---- stop: halt all motion ----
     else if (strcmp(cmd, "stop") == 0) {
         sweepState = SWEEP_NONE;
-        // Keep current position — just stop updating targets
         sendAck("stop");
     }
     else {
@@ -408,36 +424,26 @@ void updateSweep() {
     switch (sweepState) {
         case SWEEP_AZ_FWD:
             sweepAngle += step;
-            if (sweepAngle >= 360.0f) {
-                sweepAngle = 0.0f;
-                sweepState = SWEEP_NONE;
-            }
+            if (sweepAngle >= 360.0f) { sweepAngle = 0.0f; sweepState = SWEEP_NONE; }
             targetAz = sweepAngle;
             actuators.setTargetAzimuth(targetAz);
             break;
 
         case SWEEP_EL_FWD:
             sweepAngle += step;
-            if (sweepAngle >= TILT_MAX_DEG) {
-                sweepAngle = TILT_MAX_DEG;
-                sweepState = SWEEP_EL_REV;
-            }
+            if (sweepAngle >= TILT_MAX_DEG) { sweepAngle = TILT_MAX_DEG; sweepState = SWEEP_EL_REV; }
             targetEl = sweepAngle;
             actuators.setTiltAngle(targetEl);
             break;
 
         case SWEEP_EL_REV:
             sweepAngle -= step;
-            if (sweepAngle <= TILT_MIN_DEG) {
-                sweepAngle = TILT_MIN_DEG;
-                sweepState = SWEEP_NONE;
-            }
+            if (sweepAngle <= TILT_MIN_DEG) { sweepAngle = TILT_MIN_DEG; sweepState = SWEEP_NONE; }
             targetEl = sweepAngle;
             actuators.setTiltAngle(targetEl);
             break;
 
-        default:
-            break;
+        default: break;
     }
 }
 
@@ -448,12 +454,10 @@ void updatePanAxis() {
     actuators.setTargetAzimuth(targetAz);
 
     if (hasEncoder) {
-        // Use real AS5048A encoder via Actuators class
         actuators.updatePan();
     } else {
-        // Simulate encoder from accumulated stepper steps
-        float simPosition = actuators.getStepperPositionDeg();
-        actuators.updatePanWithPosition(simPosition);
+        float simPos = actuators.getStepperPositionDeg();
+        actuators.updatePanWithPosition(simPos);
     }
 }
 
@@ -466,23 +470,23 @@ void sendTelemetry() {
         : actuators.getStepperPositionDeg();
 
     JsonDocument doc;
-    doc["t"]     = "tel";
-    doc["az_t"]  = serialized(String(targetAz, 1));
-    doc["el_t"]  = serialized(String(targetEl, 1));
-    doc["az_c"]  = serialized(String(currentAz, 1));
-    doc["el_c"]  = serialized(String(targetEl, 1));  // servo is open-loop
-    doc["pid"]   = serialized(String(actuators.getPidOutput(), 2));
-    doc["spd"]   = serialized(String(actuators.getStepperSpeed(), 1));
-    doc["up"]    = millis();
-    doc["enc"]   = hasEncoder;
-    doc["mag"]   = hasMagnetometer;
-    doc["gps"]   = hasGNSS;
+    doc["t"]    = "tel";
+    doc["az_t"] = serialized(String(targetAz,  1));
+    doc["el_t"] = serialized(String(targetEl,  1));
+    doc["az_c"] = serialized(String(currentAz, 1));
+    doc["el_c"] = serialized(String(targetEl,  1));  // servo is open-loop
+    doc["pid"]  = serialized(String(actuators.getPidOutput(),    2));
+    doc["spd"]  = serialized(String(actuators.getStepperSpeed(), 1));
+    doc["up"]   = millis();
+    doc["enc"]  = hasEncoder;
+    doc["mag"]  = hasMagnetometer;
+    doc["gps"]  = hasGNSS;
 
     const char* sweepStr = "none";
     switch (sweepState) {
-        case SWEEP_AZ_FWD: sweepStr = "az";  break;
+        case SWEEP_AZ_FWD: sweepStr = "az"; break;
         case SWEEP_EL_FWD:
-        case SWEEP_EL_REV: sweepStr = "el";  break;
+        case SWEEP_EL_REV: sweepStr = "el"; break;
         default: break;
     }
     doc["sweep"] = sweepStr;
@@ -500,6 +504,18 @@ void sendTelemetry() {
         doc["gnss_hacc"] = serialized(String(gnss.getHorizAccM(), 1));
     }
 
+    // Magnetometer heading (when hardware is present and user has enabled it)
+    if (magHardwareOk && hasMagnetometer) {
+        doc["mag_hdg"] = serialized(String(mag.getHeadingDeg(), 1));
+    }
+
+    // Last injected target — enables pipeline display on dashboard
+    if (hasLastInject) {
+        doc["tgt_lat"] = serialized(String(lastTgtLat, 6));
+        doc["tgt_lon"] = serialized(String(lastTgtLon, 6));
+        doc["tgt_alt"] = serialized(String((float)lastTgtAlt, 1));
+    }
+
     serializeJson(doc, Serial);
     Serial.println();
 }
@@ -512,7 +528,6 @@ void sendAck(const char* cmd, JsonDocument* extra) {
     doc["t"]   = "ack";
     doc["cmd"] = cmd;
     if (extra) {
-        // Merge extra fields
         for (JsonPair kv : extra->as<JsonObject>()) {
             doc[kv.key()] = kv.value();
         }

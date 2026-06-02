@@ -13,14 +13,7 @@ static constexpr mcpwm_timer_t SERVO_MCPWM_TIMER = MCPWM_TIMER_0;
 
 // ============================================================================
 Actuators::Actuators()
-#ifdef USE_ULN2003
-    // 28BYJ-48: Half-step 4-wire mode
-    // AccelStepper pin order: IN1, IN3, IN2, IN4 for correct phase sequence
-    : _stepper(AccelStepper::HALF4WIRE, PIN_IN1, PIN_IN3, PIN_IN2, PIN_IN4)
-#else
-    // NEMA17 + TB6600: Step/Dir driver mode
     : _stepper(AccelStepper::DRIVER, PIN_STEP, PIN_DIR)
-#endif
     , _panOffset(0.0f)
     , _pid{PAN_PID_KP, PAN_PID_KI, PAN_PID_KD}
     , _targetAzDeg(0.0f)
