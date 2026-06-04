@@ -15,11 +15,11 @@
 }
 body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;
   display:flex;align-items:center;justify-content:center;padding:24px}
-.wrap{max-width:880px;width:100%}
+.wrap{max-width:1100px;width:100%}
 header{text-align:center;margin-bottom:28px}
 header h1{font-size:1.6rem;font-weight:700;color:var(--accent)}
 header p{color:var(--text2);font-size:.85rem;margin-top:6px}
-.cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
 .card{display:block;text-decoration:none;color:inherit;background:var(--card);
   border:1px solid var(--border);border-radius:14px;padding:24px;transition:.18s}
 .card:hover{border-color:var(--accent);transform:translateY(-3px)}
@@ -29,6 +29,7 @@ header p{color:var(--text2);font-size:.85rem;margin-top:6px}
   text-transform:uppercase;padding:2px 8px;border-radius:4px;margin-bottom:10px}
 .card.bench .tag{background:#10301f;color:var(--green)}
 .card.mission .tag{background:#1d1733;color:var(--accent2)}
+.card.check .tag{background:#12222f;color:var(--accent)}
 .card p{font-size:.8rem;color:var(--text2);line-height:1.5}
 .card ul{list-style:none;margin-top:10px;font-size:.74rem;color:var(--text2)}
 .card li{padding:2px 0}
@@ -38,7 +39,7 @@ header p{color:var(--text2);font-size:.85rem;margin-top:6px}
 .note b{color:var(--text)}
 .note code{font-family:var(--mono);background:#0f1424;border:1px solid var(--border);
   padding:1px 6px;border-radius:4px;color:var(--accent)}
-@media(max-width:680px){.cards{grid-template-columns:1fr}}
+@media(max-width:900px){.cards{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -49,6 +50,18 @@ header p{color:var(--text2);font-size:.85rem;margin-top:6px}
   </header>
 
   <div class="cards">
+    <a class="card check" href="component_check.html">
+      <div class="ic">🔌</div>
+      <span class="tag">Bring-up · Check</span>
+      <h2>Component Check</h2>
+      <p>Poke each part on its own and confirm it's wired up and responding — before any integrated run.</p>
+      <ul>
+        <li>One link-status pill per component (moving / live / fix)</li>
+        <li>Stepper sweep, servo 0–90° slider, live encoder dial, GNSS</li>
+        <li>Encoder reads live every frame — no toggle needed</li>
+      </ul>
+    </a>
+
     <a class="card bench" href="test_bench.html">
       <div class="ic">🔧</div>
       <span class="tag">Version A · Test</span>

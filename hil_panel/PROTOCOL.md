@@ -2,8 +2,9 @@
 
 Newline-delimited JSON over USB-CDC at **115200 baud**. Every message is one
 compact JSON object terminated by `\n`. This file is the single source of truth:
-the firmware (`src/main.cpp`) and both web panels (`mission.html`,
-`test_bench.html`) all implement exactly what is written here.
+the firmware (`src/main.cpp`) and the web panels (`mission.html`,
+`test_bench.html`, `component_check.html`) all implement exactly what is written
+here.
 
 The magnetometer has been removed from the project. Sensors are the **AS5048A
 encoder** (pan feedback) and the **u-blox SAM-M10Q GNSS** (base station). The

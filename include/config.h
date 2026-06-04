@@ -15,15 +15,15 @@
 // ============================================================================
 
 static constexpr int PIN_STEP       = 16; //Pulse
-static constexpr int PIN_DIR        = 17;
-static constexpr int PIN_ENABLE     = 18;
+static constexpr int PIN_DIR        = 15;
+static constexpr int PIN_ENABLE     = 7;
 
 // --- AS5048A Magnetic Encoder (SPI) ---
-static constexpr int PIN_ENC_CS     = 5;
-// SPI bus uses default ESP32-S3 pins: MOSI=11, MISO=13, SCK=12
+static constexpr int PIN_ENC_CS     = 10;
+// SPI bus uses default ESP32-S3 pins: MOSI=11, SCK=12, MISO=13
 
 // --- DS51150 Tilt Servo (MCPWM) ---
-static constexpr int PIN_TILT_SERVO = 4;
+static constexpr int PIN_TILT_SERVO = 21;
 
 // --- UART from Heltec LoRa Receiver ---
 static constexpr int  UART_RX_PIN   = 44;
@@ -31,8 +31,8 @@ static constexpr int  UART_TX_PIN   = 43;
 static constexpr long UART_BAUD     = 115200;
 
 // --- I2C Bus (GPS) ---
-static constexpr int I2C_SDA_PIN    = 8;
-static constexpr int I2C_SCL_PIN    = 9;
+static constexpr int I2C_SDA_PIN    = 5;
+static constexpr int I2C_SCL_PIN    = 4;
 
 // ============================================================================
 //  MECHANICAL CONSTANTS
