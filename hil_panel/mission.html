@@ -706,17 +706,27 @@ function flightTick(){
   const S=FLIGHT_TRAJ.samples, hz=FLIGHT_TRAJ.hz, speed=+$('flSpeed').value;
   const t=(performance.now()-flT0)/1000*speed, fi=t*hz;
   if(fi>=S.length-1){                  // reached the end of the flight
-    const last=S[S.length-1]; sendTrack(last.e,last.n,last.u);
+    const last=S[S.length-1];
+    setTargetCoord(last.lat,last.lon,last.alt,{sendCmd:false});
+    sendTrack(last.e,last.n,last.u);
     $('flStatus').textContent='t='+t.toFixed(1)+'s  — flight complete —';
     stopFlight(); return;
   }
   const i=Math.floor(fi), f=fi-i, a=S[i], c=S[i+1];
-  let e=a.e+(c.e-a.e)*f, n=a.n+(c.n-a.n)*f, u=a.u+(c.u-a.u)*f;
+  const e=a.e+(c.e-a.e)*f, n=a.n+(c.n-a.n)*f, u=a.u+(c.u-a.u)*f;
+  // Drive the panel target + tracker sphere (blue marker) from the true flight
+  // position so it animates independent of hardware telemetry. No command is sent
+  // here; the (optionally noisy) position is streamed separately via `track`.
+  const lat=a.lat+(c.lat-a.lat)*f, lon=a.lon+(c.lon-a.lon)*f, alt=a.alt+(c.alt-a.alt)*f;
+  setTargetCoord(lat,lon,alt,{sendCmd:false});
+  // Stream to the firmware, adding GPS noise to the streamed copy only (so the blue
+  // truth marker stays clean while the firmware/green marker shows the filtered result).
+  let se=e, sn=n, su=u;
   const noisy=$('flNoiseOn').checked;
-  if(noisy){ const s=+$('flNoise').value||0; e+=gauss(s); n+=gauss(s); u+=gauss(s); }
-  sendTrack(e,n,u);
+  if(noisy){ const s=+$('flNoise').value||0; se+=gauss(s); sn+=gauss(s); su+=gauss(s); }
+  sendTrack(se,sn,su);
   $('flStatus').textContent='t='+t.toFixed(1)+'s ('+Math.round(100*fi/(S.length-1))+'%)  ENU('
-    +e.toFixed(0)+','+n.toFixed(0)+','+u.toFixed(0)+')m'+(noisy?'  +noise':'');
+    +se.toFixed(0)+','+sn.toFixed(0)+','+su.toFixed(0)+')m'+(noisy?'  +noise':'');
 }
 
 // ===========================================================================
