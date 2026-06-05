@@ -89,7 +89,13 @@ Telemetry emits each sensor's **raw** wire value beside the actuator state so th
 
 ### Unused-in-HIL components
 
-`lib/TelemetryPacket` defines the 22-byte LoRa binary packet for the real receiver (UART2 from a Heltec gateway); it's not referenced by the HIL `main.cpp`. `lib/SignalFilter` (alpha-beta filter, tuned via `AB_ALPHA/BETA/DT` in config) is similarly unused here. Both are present for the production firmware that lives elsewhere — leave the includes available, but don't expect them on any code path the HIL harness exercises.
+`lib/TelemetryPacket` defines the 22-byte LoRa binary packet for the real receiver (UART2 from a Heltec gateway); it's not referenced by the HIL `main.cpp`. It is present for the production firmware that lives elsewhere — leave the include available, but don't expect it on any HIL code path.
+
+`lib/SignalFilter` (alpha-beta filter, tuned via `AB_ALPHA/BETA` in config) **is now exercised in HIL** on the `track` command path: `main.cpp` runs three instances (one per E/N/U axis, `dt = 1/TRACK_STREAM_HZ`) to smooth the streamed flight-replay position before the WGS84 reconstruction and pointing. See the flight-replay pipeline below.
+
+### Flight replay (`track` command)
+
+`hil_panel/mission.html` can stream a recorded rocket flight as if it were live telemetry. `tools/convert_flight.py` resamples `flight_data.csv` (local Cartesian X=East, Y=North, Z=Up MSL; launch pad 700 m N / 200 m E of the tracker, ground 892 m) to a fixed 15 Hz and emits the generated `hil_panel/flight_trajectory.js`. The panel's **Flight Replay** player streams `{cmd:"track", e, n, u}` (local ENU metres, optional synthetic GPS noise) at 15 Hz. The firmware pipeline: **alpha-beta filter (metres) → `enuToGeodetic` (flat-earth ENU→WGS84) → `computePointing` (WGS84→Az/El) → PID pan + servo tilt**, echoing raw vs filtered ENU in telemetry (`trk`, `trk_*_raw`, `trk_*`). Regenerate the trajectory with `python tools/convert_flight.py`; do not hand-edit `flight_trajectory.js`.
 
 ### Misc
 

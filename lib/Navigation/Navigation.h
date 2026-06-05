@@ -49,4 +49,13 @@ Vec3d ecefToENU(const Vec3d& dECEF, double refLatDeg, double refLonDeg);
 PointingAngles computePointing(double baseLat, double baseLon, double baseAlt,
                                 double tgtLat,  double tgtLon,  double tgtAlt);
 
+/// Convert a local ENU offset (metres, relative to the base) back to WGS84
+/// geodetic coordinates using the flat-earth approximation (the same
+/// 111320 / 111320·cosφ convention the web panels use; <0.1 % error over a few
+/// km). Lets a streamed local-position target be reconstructed as a real WGS84
+/// fix and fed through computePointing().
+/// @return Vec3d reused as geodetic: { x = latitude°, y = longitude°, z = altitude m }.
+Vec3d enuToGeodetic(double e, double n, double u,
+                    double baseLat, double baseLon, double baseAlt);
+
 #endif // NAVIGATION_H

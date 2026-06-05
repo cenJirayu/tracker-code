@@ -23,7 +23,8 @@ debugged end to end.
 | `set_sensors` | `enc` bool, `gps` bool          | Toggle which sensors the firmware uses as live sources. |
 | `direct`      | `az` deg, `el` deg (either/both)| Command pan/tilt angles directly; cancels any sweep. |
 | `inject`      | `lat`, `lon` deg, `alt` m       | Target coordinate → Az/El via WGS84→ENU navigation. |
-| `set_base`    | `lat`, `lon` deg, `alt` m       | Override the base-station origin used by `inject`. |
+| `track`       | `e`, `n`, `u` metres            | Streamed local ENU position (rel. base, incl. launch offset) → alpha-beta filter → ENU→WGS84 → Az/El. Used by the flight-replay player. |
+| `set_base`    | `lat`, `lon` deg, `alt` m       | Override the base-station origin used by `inject` / `track`. |
 | `set_pid`     | `kp`, `ki`, `kd` (≥0)           | Retune the pan speed PID. |
 | `home`        | —                               | Return to Az=0, El=0. |
 | `sweep_az`    | —                               | Sweep azimuth 0→360 once, then stop. |
@@ -122,4 +123,11 @@ Panels interpret these as: fix label, `lat = gnss_lat_e7 / 1e7`,
 | `base_lon` | interpreted | Base longitude (deg, 6 dp). |
 | `base_alt` | interpreted | Base altitude (m). |
 | `base_src` | flag        | `gnss` when a live GNSS fix drives the base, else `manual`. |
-| `tgt_lat`/`tgt_lon`/`tgt_alt` | echo | Last injected target; present only after the first `inject`. |
+| `tgt_lat`/`tgt_lon`/`tgt_alt` | echo | Last `inject`/`track` target; present after the first such command. For `track` this is the WGS84 fix reconstructed from the filtered ENU. |
+
+**Flight-replay track** — `trk` is always present; the rest only while a replay is active
+| Field          | Kind        | Meaning |
+|----------------|-------------|---------|
+| `trk`          | flag        | A `track` replay is streaming. The fields below are present only when true. |
+| `trk_e_raw`/`trk_n_raw`/`trk_u_raw` | raw | Last streamed local ENU position (m), **before** filtering. |
+| `trk_e`/`trk_n`/`trk_u` | interpreted | Alpha-beta-**filtered** ENU position (m) actually fed to the WGS84→Az/El transform. |

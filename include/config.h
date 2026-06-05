@@ -118,6 +118,23 @@ static constexpr float AB_BETA  = 0.005f;
 static constexpr float AB_DT    = 0.01f;
 
 // ============================================================================
+//  FLIGHT-REPLAY TRACK STREAM (mission.html → `track` command)
+// ============================================================================
+
+/// Cadence (Hz) at which the panel streams `track` position samples. The three
+/// per-axis alpha-beta filters use 1/TRACK_STREAM_HZ as their dt, so this MUST
+/// match the panel's playback rate or the velocity term extrapolates wrong.
+static constexpr float TRACK_STREAM_HZ = 15.0f;
+
+/// Idle gap (ms) after which the next `track` sample re-seeds the filters — i.e.
+/// the start of a fresh replay resets the smoothing state.
+static constexpr unsigned long TRACK_IDLE_RESET_MS = 500;
+
+/// Launch-site ground level (m MSL) for flight_data.csv. The base station is set
+/// here during replay so elevation starts on the horizon (Z starts/ends at 892).
+static constexpr double HIL_LAUNCH_BASE_ALT = 892.0;
+
+// ============================================================================
 //  CONTROL LOOP TIMING
 // ============================================================================
 

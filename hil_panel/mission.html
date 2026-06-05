@@ -239,6 +239,16 @@ input[type=range]:disabled::-webkit-slider-thumb{background:var(--text2);box-sha
           <button class="btn btn-sm btn-green" id="btnSim">▶ Run</button>
         </div>
         <div class="sim-status" id="simStatus"></div>
+
+        <label style="margin-top:10px">Flight replay <span style="color:var(--text2)" id="flightInfo">flight_data.csv</span></label>
+        <div class="row3" style="margin-top:4px">
+          <div class="field"><label>Speed ×</label>
+            <select id="flSpeed"><option value="1">1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option><option value="20">20×</option></select></div>
+          <div class="field"><label>GPS σ (m)</label><input type="number" id="flNoise" value="8" min="0" step="1"></div>
+          <div class="field" style="justify-content:end"><label class="toggle"><input type="checkbox" id="flNoiseOn"> Noise</label></div>
+          <button class="btn btn-sm btn-green" id="btnFlight">▶ Launch</button>
+        </div>
+        <div class="sim-status" id="flStatus"></div>
       </div>
     </div>
   </div>
@@ -277,6 +287,12 @@ input[type=range]:disabled::-webkit-slider-thumb{background:var(--text2);box-sha
           <div class="kv"><div class="kk">Alt</div><div class="vv" id="pTAlt">—</div></div>
         </div>
         <div class="arrow">→</div>
+        <div class="stage"><h4>Filter (ENU m)</h4>
+          <div class="kv"><div class="kk">E raw→flt</div><div class="vv" id="pFltE">—</div></div>
+          <div class="kv"><div class="kk">N raw→flt</div><div class="vv" id="pFltN">—</div></div>
+          <div class="kv"><div class="kk">U raw→flt</div><div class="vv" id="pFltU">—</div></div>
+        </div>
+        <div class="arrow">→</div>
         <div class="stage"><h4>Nav → Az/El</h4>
           <div class="kv"><div class="kk">Az</div><div class="vv" id="pAz">—</div></div>
           <div class="kv"><div class="kk">El</div><div class="vv" id="pEl">—</div></div>
@@ -310,6 +326,7 @@ input[type=range]:disabled::-webkit-slider-thumb{background:var(--text2);box-sha
 
 </div>
 
+<script src="flight_trajectory.js"></script>
 <script>
 "use strict";
 /* ===========================================================================
@@ -354,6 +371,7 @@ async function connect(){
 async function disconnect(){
   state.connected = false;
   stopSim();
+  stopFlight();
   try{
     if(reader){ await reader.cancel(); reader.releaseLock(); }
     if(streamClosed) await streamClosed.catch(()=>{});
@@ -519,6 +537,11 @@ function renderPipeline(d){
   $('pFbAz').textContent=fmt(d.az_c)+'°';
   $('pFbEnc').textContent = d.enc ? (fmt(d.enc_deg)+'° ('+d.enc_raw+')') : 'sim '+fmt(d.pos)+'°';
   $('pFbGnss').textContent = (d.gnss_fix!==undefined) ? ((FIX_LABELS[d.gnss_fix]||'?')+' / '+(d.gnss_sats||0)+'sv') : 'off';
+  if(d.trk){
+    $('pFltE').textContent=fmt(d.trk_e_raw,0)+'→'+fmt(d.trk_e,0);
+    $('pFltN').textContent=fmt(d.trk_n_raw,0)+'→'+fmt(d.trk_n,0);
+    $('pFltU').textContent=fmt(d.trk_u_raw,0)+'→'+fmt(d.trk_u,0);
+  }else{ $('pFltE').textContent='—'; $('pFltN').textContent='—'; $('pFltU').textContent='—'; }
 }
 
 // ===========================================================================
@@ -646,10 +669,61 @@ function simTick(){
 }
 
 // ===========================================================================
+//  Flight replay — streams flight_data.csv as `track` telemetry over the link
+//  so the firmware runs it through filter → coordinate change → motor control.
+// ===========================================================================
+let flTimer=null, flT0=0, flNoiseSpare=null;
+function gauss(sigma){                 // Box–Muller with a cached spare deviate
+  if(flNoiseSpare!==null){ const v=flNoiseSpare; flNoiseSpare=null; return v*sigma; }
+  const u=Math.max(1e-9,Math.random()), v=Math.random(), r=Math.sqrt(-2*Math.log(u));
+  flNoiseSpare=r*Math.sin(2*Math.PI*v);
+  return r*Math.cos(2*Math.PI*v)*sigma;
+}
+function sendTrack(e,n,u){ send({cmd:'track', e:round1(e), n:round1(n), u:round1(u)}); }
+function startFlight(){
+  if(state.phase!=='active'){ flashHint('Flight replay runs in the Active phase only.'); return; }
+  if(!state.connected){ flashHint('Connect before launching the replay.'); return; }
+  if(!window.FLIGHT_TRAJ || !FLIGHT_TRAJ.samples.length){ flashHint('flight_trajectory.js not loaded.'); return; }
+  // Base = launch site, so the firmware's reconstructed tgt_lat/lon/alt read as
+  // real MSL coordinates and elevation starts on the horizon.
+  const b=FLIGHT_TRAJ.base;
+  $('baseLat').value=b.lat.toFixed(7); $('baseLon').value=b.lon.toFixed(7); $('baseAlt').value=b.alt;
+  state.base.lat=b.lat; state.base.lon=b.lon; state.base.alt=b.alt;
+  send({cmd:'set_base', lat:b.lat, lon:b.lon, alt:b.alt});
+  flT0=performance.now(); flNoiseSpare=null;
+  $('btnFlight').textContent='■ Abort'; $('btnFlight').className='btn btn-sm btn-red';
+  // Tick at the trajectory's native cadence so the wall-clock `track` rate matches
+  // the firmware filter's dt (1/TRACK_STREAM_HZ) at any speed multiplier.
+  flTimer=setInterval(flightTick, Math.max(20, Math.round(1000/FLIGHT_TRAJ.hz)));
+}
+function stopFlight(){
+  if(!flTimer) return;
+  clearInterval(flTimer); flTimer=null;
+  $('btnFlight').textContent='▶ Launch'; $('btnFlight').className='btn btn-sm btn-green';
+  if(state.connected) send({cmd:'stop'});
+}
+function flightTick(){
+  const S=FLIGHT_TRAJ.samples, hz=FLIGHT_TRAJ.hz, speed=+$('flSpeed').value;
+  const t=(performance.now()-flT0)/1000*speed, fi=t*hz;
+  if(fi>=S.length-1){                  // reached the end of the flight
+    const last=S[S.length-1]; sendTrack(last.e,last.n,last.u);
+    $('flStatus').textContent='t='+t.toFixed(1)+'s  — flight complete —';
+    stopFlight(); return;
+  }
+  const i=Math.floor(fi), f=fi-i, a=S[i], c=S[i+1];
+  let e=a.e+(c.e-a.e)*f, n=a.n+(c.n-a.n)*f, u=a.u+(c.u-a.u)*f;
+  const noisy=$('flNoiseOn').checked;
+  if(noisy){ const s=+$('flNoise').value||0; e+=gauss(s); n+=gauss(s); u+=gauss(s); }
+  sendTrack(e,n,u);
+  $('flStatus').textContent='t='+t.toFixed(1)+'s ('+Math.round(100*fi/(S.length-1))+'%)  ENU('
+    +e.toFixed(0)+','+n.toFixed(0)+','+u.toFixed(0)+')m'+(noisy?'  +noise':'');
+}
+
+// ===========================================================================
 //  Mission phases
 // ===========================================================================
 function applyPhase(p){
-  state.phase=p; stopSim();
+  state.phase=p; stopSim(); stopFlight();
   for(const [id,ph] of [['phSetup','setup'],['phStandby','standby'],['phActive','active']]){
     const order={setup:0,standby:1,active:2};
     const el=$(id); el.classList.remove('active','done');
@@ -719,6 +793,7 @@ function wire(){
   $('btnHome').onclick = ()=>{ send({cmd:'home'}); setTargetAzEl(0,0,{sendCmd:false}); };
   $('btnStop').onclick = ()=> send({cmd:'stop'});
   $('btnSim').onclick = ()=> simTimer?stopSim():startSim();
+  $('btnFlight').onclick = ()=> flTimer?stopFlight():startFlight();
 
   $('rangeTag').textContent='(@ '+SLANT_KM.toFixed(1)+' km slant)';
 }

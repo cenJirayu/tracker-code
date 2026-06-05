@@ -95,3 +95,20 @@ PointingAngles computePointing(double baseLat, double baseLon, double baseAlt,
 
     return pa;
 }
+
+// --------------------------------------------------------------------------
+// Local ENU offset (metres) → WGS84 geodetic (flat-earth approximation)
+//
+// Inverse-ish of the East/North columns of ecefToENU, accurate to <0.1 % over
+// a few km. Vec3d is reused as a geodetic carrier: x=lat°, y=lon°, z=alt m.
+// --------------------------------------------------------------------------
+Vec3d enuToGeodetic(double e, double n, double u,
+                    double baseLat, double baseLon, double baseAlt) {
+    static constexpr double M_PER_DEG = 111320.0;  // metres per degree of latitude
+
+    Vec3d geo;
+    geo.x = baseLat + n / M_PER_DEG;                              // latitude  (deg)
+    geo.y = baseLon + e / (M_PER_DEG * cos(baseLat * DEG2RAD));   // longitude (deg)
+    geo.z = baseAlt + u;                                          // altitude  (m)
+    return geo;
+}

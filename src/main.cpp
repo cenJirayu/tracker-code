@@ -17,6 +17,7 @@
 #include "ActuatorControl.h"
 #include "Navigation.h"
 #include "GNSSManager.h"
+#include "SignalFilter.h"
 
 // ============================================================================
 //  Global Objects
@@ -58,6 +59,24 @@ double lastTgtLat = 0.0;
 double lastTgtLon = 0.0;
 double lastTgtAlt = 0.0;
 bool   hasLastInject = false;
+
+// ============================================================================
+//  Flight-Replay Track State (mission.html `track` command)
+//
+//  The panel streams a rocket flight as local ENU position (metres, relative to
+//  the base, incl. the launch offset). Each axis is smoothed by its own
+//  alpha-beta filter (dt = 1/TRACK_STREAM_HZ), then reconstructed to a WGS84 fix
+//  and run through the existing Navigation + motor-control pipeline.
+// ============================================================================
+AlphaBetaFilter trackFilterE(AB_ALPHA, AB_BETA, 1.0f / TRACK_STREAM_HZ);
+AlphaBetaFilter trackFilterN(AB_ALPHA, AB_BETA, 1.0f / TRACK_STREAM_HZ);
+AlphaBetaFilter trackFilterU(AB_ALPHA, AB_BETA, 1.0f / TRACK_STREAM_HZ);
+bool          trackActive  = false;
+unsigned long lastTrackMs  = 0;
+// Raw + filtered ENU cache (metres), surfaced in telemetry so the panel can show
+// the on-device filter at work.
+float trkERaw = 0.0f, trkNRaw = 0.0f, trkURaw = 0.0f;
+float trkE    = 0.0f, trkN    = 0.0f, trkU    = 0.0f;
 
 // ============================================================================
 //  Sweep State Machine
@@ -327,6 +346,59 @@ void processCommand(JsonDocument& doc) {
         ack["el"] = targetEl;
         sendAck("inject", &ack);
     }
+    // ---- track: streamed local ENU position → filter → WGS84 → Az/El ----
+    else if (strcmp(cmd, "track") == 0) {
+        if (doc["e"].isNull() || doc["n"].isNull() || doc["u"].isNull()) {
+            sendError("track: missing e/n/u");
+            return;
+        }
+
+        // Re-seed the filters at the start of a fresh replay (idle gap since the
+        // last sample), so a new flight doesn't inherit the old smoothing state.
+        unsigned long nowMs = millis();
+        if (nowMs - lastTrackMs > TRACK_IDLE_RESET_MS) {
+            trackFilterE.reset();
+            trackFilterN.reset();
+            trackFilterU.reset();
+        }
+        lastTrackMs = nowMs;
+
+        // FILTER: raw streamed metres → smoothed metres (per axis).
+        trkERaw = doc["e"].as<float>();
+        trkNRaw = doc["n"].as<float>();
+        trkURaw = doc["u"].as<float>();
+        trkE = trackFilterE.update(trkERaw);
+        trkN = trackFilterN.update(trkNRaw);
+        trkU = trackFilterU.update(trkURaw);
+
+        // CHANGE COORDINATE: filtered local ENU → WGS84 geodetic fix.
+        Vec3d g = enuToGeodetic(trkE, trkN, trkU, baseLat, baseLon, baseAlt);
+
+        // WGS84 → Az/El via the existing designed pointing transform.
+        PointingAngles pa = computePointing(baseLat, baseLon, baseAlt,
+                                            g.x, g.y, g.z);
+        targetAz = (float)pa.azimuth;
+        targetEl = (float)pa.elevation;
+        if (targetEl < TILT_MIN_DEG) targetEl = TILT_MIN_DEG;
+        if (targetEl > TILT_MAX_DEG) targetEl = TILT_MAX_DEG;
+
+        // MOTOR CONTROL: drive the pan PID + tilt servo to the new target.
+        actuators.setTargetAzimuth(targetAz);
+        actuators.setTiltAngle(targetEl);
+        sweepState = SWEEP_NONE;
+
+        // Echo the reconstructed WGS84 fix as the pipeline target.
+        lastTgtLat    = g.x;
+        lastTgtLon    = g.y;
+        lastTgtAlt    = g.z;
+        hasLastInject = true;
+        trackActive   = true;
+
+        JsonDocument ack;
+        ack["az"] = targetAz;
+        ack["el"] = targetEl;
+        sendAck("track", &ack);
+    }
     // ---- set_base: update base station coordinates ----
     else if (strcmp(cmd, "set_base") == 0) {
         if (doc["lat"].isNull() || doc["lon"].isNull() || doc["alt"].isNull()) {
@@ -346,6 +418,8 @@ void processCommand(JsonDocument& doc) {
         actuators.setTargetAzimuth(0.0f);
         actuators.setTiltAngle(0.0f);
         sweepState = SWEEP_NONE;
+        trackActive = false;
+        trackFilterE.reset(); trackFilterN.reset(); trackFilterU.reset();
         sendAck("home");
     }
     // ---- set_pid: update PID gains ----
@@ -386,6 +460,8 @@ void processCommand(JsonDocument& doc) {
     // ---- stop: halt all motion ----
     else if (strcmp(cmd, "stop") == 0) {
         sweepState = SWEEP_NONE;
+        trackActive = false;
+        trackFilterE.reset(); trackFilterN.reset(); trackFilterU.reset();
         sendAck("stop");
     }
     else {
@@ -515,6 +591,18 @@ void sendTelemetry() {
         doc["tgt_lat"] = serialized(String(lastTgtLat, 6));
         doc["tgt_lon"] = serialized(String(lastTgtLon, 6));
         doc["tgt_alt"] = serialized(String((float)lastTgtAlt, 1));
+    }
+
+    // Flight-replay track pipeline — raw vs filtered ENU (metres) so the panel
+    // can show the on-device alpha-beta filter at work.
+    doc["trk"] = trackActive;
+    if (trackActive) {
+        doc["trk_e_raw"] = serialized(String(trkERaw, 1));
+        doc["trk_n_raw"] = serialized(String(trkNRaw, 1));
+        doc["trk_u_raw"] = serialized(String(trkURaw, 1));
+        doc["trk_e"]     = serialized(String(trkE, 1));
+        doc["trk_n"]     = serialized(String(trkN, 1));
+        doc["trk_u"]     = serialized(String(trkU, 1));
     }
 
     serializeJson(doc, Serial);
