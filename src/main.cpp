@@ -34,6 +34,12 @@ bool hasGNSS    = false;   // u-blox GNSS drives the base station
 // toggle (hasGNSS).
 bool gnssHardwareOk = false;
 
+// One-shot guard for the background base acquisition in loop(). Replaces the
+// old blocking 120 s wait in setup(): the first precise fix is adopted as the
+// base exactly once, and any manual control (set_base / set_sensors gps)
+// disables it so it can't override the operator.
+bool gnssAutoBaseDone = false;
+
 // ============================================================================
 //  Base Station Position (manual entry or GNSS)
 // ============================================================================
@@ -101,46 +107,27 @@ void setup() {
     actuators.begin();
 
     // ---- GNSS (u-blox SAM-M10Q, I2C) ----
+    // Detect the module but DO NOT block boot waiting for a fix. The previous
+    // code spun here for up to GNSS_FIX_TIMEOUT_MS (120 s) before emitting any
+    // telemetry, so indoors (no precise fix) the harness looked dead. Fix
+    // acquisition now runs non-blocking in loop() (see the background-adopt
+    // block); the base stays at the default until a precise fix arrives.
     gnssHardwareOk = gnss.begin();
     if (gnssHardwareOk) {
-        Serial.println("HIL: GNSS OK — waiting for precise fix...");
-        uint32_t gnssStart   = millis();
-        uint32_t gnssLastLog = 0;
-        while (millis() - gnssStart < GNSS_FIX_TIMEOUT_MS) {
-            gnss.update();
-            if (gnss.isValid()
-                    && gnss.getSatsUsed() >= GNSS_PRECISE_MIN_SATS
-                    && gnss.getHorizAccM() <= GNSS_PRECISE_MAX_HACC_M) {
-                baseLat  = gnss.getLat();
-                baseLon  = gnss.getLon();
-                baseAlt  = gnss.getAlt();
-                hasGNSS  = true;
-                Serial.print("HIL: Base set from GNSS. Sats=");
-                Serial.print(gnss.getSatsUsed());
-                Serial.print(" hAcc=");
-                Serial.print(gnss.getHorizAccM(), 1);
-                Serial.println("m");
-                break;
-            }
-            uint32_t now = millis();
-            if (now - gnssLastLog >= 5000) {
-                gnssLastLog = now;
-                Serial.print("HIL: GNSS searching — fix=");
-                Serial.print(gnss.getFixType());
-                Serial.print(" sats=");
-                Serial.println(gnss.getSatsUsed());
-            }
-            delay(100);
-        }
-        if (!hasGNSS) {
-            Serial.println("HIL: GNSS timeout — using default base station.");
-        }
+        Serial.println("HIL: GNSS OK - acquiring fix in background (non-blocking).");
     } else {
-        Serial.println("HIL: GNSS not found on I2C.");
+        Serial.println("HIL: GNSS not found on I2C - using default base station.");
     }
 
     // Reserve buffer for serial input
     serialBuffer.reserve(256);
+
+    // ---- Capture boot heading as North (0° reference for the session) ----
+    // Operator aligns the rig to North, then reboots. Done before the self-test
+    // jog — the AS5048A is absolute, so the jog/return doesn't move the reference.
+    for (int i = 0; i < 5; ++i) { actuators.readEncoderRaw(); delayMicroseconds(500); }
+    actuators.setPanNorthOffset(0.0);
+    Serial.println("HIL: North captured at boot heading.");
 
     // ---- Startup Self-Test ----
     Serial.println("HIL: Running startup self-test...");
@@ -194,6 +181,21 @@ void loop() {
     // 2. Poll GNSS and update base station when enabled
     if (gnssHardwareOk) {
         gnss.update();
+
+        // Background base acquisition (replaces the old blocking setup() wait):
+        // adopt the first precise fix as the base, exactly once, unless the
+        // operator has already taken manual control via set_base/set_sensors.
+        if (!gnssAutoBaseDone
+                && gnss.isValid()
+                && gnss.getSatsUsed() >= GNSS_PRECISE_MIN_SATS
+                && gnss.getHorizAccM() <= GNSS_PRECISE_MAX_HACC_M) {
+            baseLat = gnss.getLat();
+            baseLon = gnss.getLon();
+            baseAlt = gnss.getAlt();
+            hasGNSS = true;
+            gnssAutoBaseDone = true;
+        }
+
         if (hasGNSS && gnss.isValid()) {
             baseLat = gnss.getLat();
             baseLon = gnss.getLon();
@@ -268,6 +270,7 @@ void processCommand(JsonDocument& doc) {
                 baseAlt = gnss.getAlt();
             }
             hasGNSS = newGNSS;
+            gnssAutoBaseDone = true;  // operator now controls the base source
         }
 
         JsonDocument ack;
@@ -333,6 +336,7 @@ void processCommand(JsonDocument& doc) {
         baseLat = doc["lat"].as<double>();
         baseLon = doc["lon"].as<double>();
         baseAlt = doc["alt"].as<double>();
+        gnssAutoBaseDone = true;  // manual base overrides background acquisition
         sendAck("set_base");
     }
     // ---- home: return to Az=0, El=0 ----
@@ -452,7 +456,7 @@ void sendTelemetry() {
     // active source, else the simulated stepper position. Keeping az_c tied
     // to the same read means enc_deg and az_c never disagree.
     uint16_t encRaw  = actuators.readEncoderRaw();
-    float    encDeg  = encRaw * (360.0f / 16384.0f);
+    float    encDeg  = actuators.panAngleFromRaw(encRaw);  // north-ref + dir-corrected
     float    stepPos = actuators.getStepperPositionDeg();
     float    currentAz = hasEncoder ? encDeg : stepPos;
 

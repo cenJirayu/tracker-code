@@ -39,6 +39,9 @@ public:
     void  setPanNorthOffset(double northHeadingDeg);
     float readEncoderDeg();
     float getPanAngleDeg();
+    // Direction-corrected, North-referenced azimuth from an already-read raw
+    // count (no SPI access) — lets telemetry reuse its single per-tick read.
+    float panAngleFromRaw(uint16_t raw) const;
     void  setTargetAzimuth(float azDeg);
     void  updatePan();
     void  updatePanWithPosition(float currentAzDeg);
@@ -78,6 +81,8 @@ private:
     uint16_t _buildReadCommand(uint16_t address);
     static uint8_t _evenParity(uint16_t value);
     static float _angleDiffDeg(float target, float current);
+    // Raw 14-bit count → direction-corrected degrees [0,360) (no North offset).
+    static float _dirCorrectedDeg(uint16_t raw);
 
     // Shared PID core. Both updatePan() and updatePanWithPosition() compute
     // their own positional error, then delegate the deadband + anti-windup +

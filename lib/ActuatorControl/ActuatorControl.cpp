@@ -28,9 +28,12 @@ Actuators::Actuators()
 // ============================================================================
 void Actuators::begin() {
     // --- SPI for AS5048A encoder ---
+    // Drive explicit pins — the esp32s3usbotg variant does not necessarily map
+    // the default SPI bus to these GPIOs, so a bare SPI.begin() can leave the
+    // encoder's wired pins undriven (reads come back as 0).
     pinMode(PIN_ENC_CS, OUTPUT);
     digitalWrite(PIN_ENC_CS, HIGH);
-    SPI.begin();
+    SPI.begin(PIN_ENC_SCK, PIN_ENC_MISO, PIN_ENC_MOSI, PIN_ENC_CS);
 
     // Flush SPI pipeline (AS5048A needs two transactions; first read is stale)
     _spiTransfer16(_buildReadCommand(AS5048A_CMD_ANGLE));
@@ -83,7 +86,25 @@ uint16_t Actuators::readEncoderRaw() {
 }
 
 float Actuators::readEncoderDeg() {
-    return (float)readEncoderRaw() * (360.0f / 16384.0f);
+    return _dirCorrectedDeg(readEncoderRaw());
+}
+
+// Raw 14-bit count → degrees, with the rig's rotation sense applied so the
+// angle grows clockwise. North offset is NOT applied here (callers add it).
+float Actuators::_dirCorrectedDeg(uint16_t raw) {
+    float deg = (float)raw * (360.0f / 16384.0f);
+    if (ENC_DIR_INVERT) deg = 360.0f - deg;
+    if (deg >= 360.0f) deg -= 360.0f;   // raw==0 maps 360→0 after inversion
+    if (deg < 0.0f)    deg += 360.0f;
+    return deg;
+}
+
+// Direction-corrected + North-referenced azimuth from a pre-read raw count.
+float Actuators::panAngleFromRaw(uint16_t raw) const {
+    float angle = _dirCorrectedDeg(raw) + _panOffset;
+    while (angle < 0.0f)    angle += 360.0f;
+    while (angle >= 360.0f) angle -= 360.0f;
+    return angle;
 }
 
 uint16_t Actuators::_spiTransfer16(uint16_t cmd) {
@@ -113,11 +134,7 @@ uint8_t Actuators::_evenParity(uint16_t value) {
 //  getPanAngleDeg — True-North-referenced output angle
 // ============================================================================
 float Actuators::getPanAngleDeg() {
-    float raw = readEncoderDeg();
-    float angle = raw + _panOffset;
-    while (angle < 0.0f)    angle += 360.0f;
-    while (angle >= 360.0f) angle -= 360.0f;
-    return angle;
+    return panAngleFromRaw(readEncoderRaw());
 }
 
 // ============================================================================

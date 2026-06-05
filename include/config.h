@@ -20,7 +20,16 @@ static constexpr int PIN_ENABLE     = 7;
 
 // --- AS5048A Magnetic Encoder (SPI) ---
 static constexpr int PIN_ENC_CS     = 10;
-// SPI bus uses default ESP32-S3 pins: MOSI=11, SCK=12, MISO=13
+// Explicit SPI bus pins (do NOT rely on board variant defaults — the
+// esp32s3usbotg variant does not necessarily map SPI to these GPIOs).
+static constexpr int PIN_ENC_SCK    = 12;
+static constexpr int PIN_ENC_MISO   = 13;
+static constexpr int PIN_ENC_MOSI   = 11;
+// Encoder rotation sense. The AS5048A counts increase opposite to the desired
+// clockwise-positive azimuth on this rig, so the interpreted angle is mirrored.
+// Raw counts in telemetry are left untouched. Flip to false if a future rig
+// wires the encoder the other way.
+static constexpr bool ENC_DIR_INVERT = true;
 
 // --- DS51150 Tilt Servo (MCPWM) ---
 static constexpr int PIN_TILT_SERVO = 21;

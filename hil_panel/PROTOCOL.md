@@ -60,7 +60,7 @@ the runtime `gps` toggle).
 { "t":"tel", "up":12345,
   "az_t":45.0, "az_c":44.6, "el_t":30.0, "el_c":30.0, "sweep":"none",
   "pid":12.50, "sps":320.0, "step":8123, "pos":44.6,
-  "enc":false, "enc_raw":8190, "enc_deg":179.9,
+  "enc":false, "enc_raw":8190, "enc_deg":12.3,
   "srv_us":1444,
   "gps":false, "gnss_fix":3, "gnss_sats":9,
   "gnss_lat_e7":137563000, "gnss_lon_e7":1005018000,
@@ -76,7 +76,7 @@ the runtime `gps` toggle).
 |---------|---------------------|---------|
 | `up`    | ms                  | Uptime since boot. |
 | `az_t`  | deg, 1 dp           | Azimuth target. |
-| `az_c`  | deg, 1 dp           | Azimuth current (encoder if `enc`, else stepper position). |
+| `az_c`  | deg, 1 dp           | Azimuth current (encoder if `enc`, else stepper position). Encoder value is referenced to the heading captured at boot (`0°` = power-on heading). |
 | `el_t`  | deg, 1 dp           | Elevation target. |
 | `el_c`  | deg, 1 dp           | Elevation current — equals `el_t` (servo is open-loop). |
 | `sweep` | `none`\|`az`\|`el`  | Active sweep state. |
@@ -93,8 +93,8 @@ the runtime `gps` toggle).
 | Field     | Kind        | Meaning |
 |-----------|-------------|---------|
 | `enc`     | flag        | Whether the encoder is the active pan feedback source. |
-| `enc_raw` | raw         | 14-bit angle counts `[0,16383]`. |
-| `enc_deg` | interpreted | `enc_raw × 360/16384`, degrees. |
+| `enc_raw` | raw         | Untouched 14-bit angle counts `[0,16383]` straight off the chip. |
+| `enc_deg` | interpreted | Direction-corrected azimuth referenced to the heading captured at boot (`0°` = power-on heading). Equals `az_c` when `enc` is active. |
 
 **Tilt servo (DS51150)** — open-loop
 | Field    | Kind        | Meaning |
