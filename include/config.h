@@ -149,6 +149,33 @@ static constexpr unsigned long TELEMETRY_INTERVAL_MS = 100;  // 10 Hz
 static constexpr float SWEEP_SPEED_DEG_PER_SEC = 30.0f;
 
 // ============================================================================
+//  MISSION MODE (src/mission) — UART uplink + launch detection
+// ============================================================================
+
+/// Expected GroundLinkPacket rate from the ground Heltec. The mission
+/// alpha-beta filters use 1/LINK_RATE_HZ as their dt.
+static constexpr float    LINK_RATE_HZ          = 10.0f;
+
+/// No valid packet for this long while tracking → SIGNAL_LOST (hold pointing).
+static constexpr uint32_t LINK_TIMEOUT_MS       = 2000;
+
+/// Launch is declared when, for LAUNCH_DETECT_SAMPLES consecutive packets,
+/// altitude exceeds the pad by LAUNCH_ALT_DELTA_M or climb rate exceeds
+/// LAUNCH_CLIMB_MS.
+static constexpr float    LAUNCH_ALT_DELTA_M    = 20.0f;
+static constexpr float    LAUNCH_CLIMB_MS       = 8.0f;
+static constexpr uint8_t  LAUNCH_DETECT_SAMPLES = 3;
+
+/// Packets that must agree (within PAD_DRIFT_MAX_M of the running average)
+/// before the pad position is considered locked.
+static constexpr uint16_t PAD_LOCK_MIN_PACKETS  = 20;
+static constexpr float    PAD_DRIFT_MAX_M       = 30.0f;
+
+/// After pad lock the rig slews to the pad, then de-energises the motors once
+/// this settle window has elapsed (low-power ARMED standby).
+static constexpr uint32_t ARM_SETTLE_MS         = 5000;
+
+// ============================================================================
 //  GNSS PRECISE-FIX THRESHOLDS (background base acquisition in loop)
 // ============================================================================
 

@@ -131,3 +131,45 @@ Panels interpret these as: fix label, `lat = gnss_lat_e7 / 1e7`,
 | `trk`          | flag        | A `track` replay is streaming. The fields below are present only when true. |
 | `trk_e_raw`/`trk_n_raw`/`trk_u_raw` | raw | Last streamed local ENU position (m), **before** filtering. |
 | `trk_e`/`trk_n`/`trk_u` | interpreted | Alpha-beta-**filtered** ENU position (m) actually fed to the WGS84→Az/El transform. |
+
+---
+
+# Mission mode (standalone firmware, `pio run -e mission`)
+
+The mission firmware (`src/mission/mission_main.cpp`) runs a real launch with
+no laptop. Rocket position arrives as binary **GroundLinkPacket** frames over
+hardware UART (GPIO 44 RX, 115200 8N1) from the ground Heltec — see
+`heltec_uplink/README.md` for the 28-byte wire layout. USB-CDC stays a pure
+monitor port (`monitor.html` is the matching read-only viewer).
+
+## State machine
+
+`wait_link → pad_lock → armed → tracking ↔ signal_lost`
+
+- **pad_lock** — incoming fixes are averaged into the pad position.
+- **armed** — low-power standby: stepper de-energised, servo PWM stopped.
+- **tracking** — entered automatically on launch detection (altitude above pad
+  or sustained climb rate); same filter→navigation→PID pipeline as `track`.
+- **signal_lost** — uplink stale > 2 s: pointing holds, resumes on next frame.
+
+## Commands — restricted
+
+Only `set_base` and `set_pid`, and only **before** tracking starts. Everything
+else (and anything mid-flight) answers `err "mission mode: read-only"`.
+
+## Extra `tel` fields
+
+| Field | Meaning |
+|-------|---------|
+| `mode` | `"mission"` (absent/`"hil"` from the HIL harness). |
+| `mstate` | State name as listed above. |
+| `mot` | Motors energised (false in armed standby). |
+| `rx_ok` / `rx_bad` | Valid / rejected uplink frames since boot. |
+| `age_ms` | ms since the last valid frame (-1 before first). |
+| `seq`, `rssi`, `snr` | From the last GroundLinkPacket (link diagnostics). |
+| `rkt_lat/lon/alt`, `clb` | Last rocket fix and EMA climb rate (m/s). |
+| `pad_lat/lon/alt`, `pad_n` | Locked pad position and packets averaged. |
+| `base_src` | `gnss`, `manual` (set_base), or `default` (no fix yet). |
+
+`ready` carries `mode:"mission"`; `trk`/`trk_*` fields behave as in HIL, with
+the uplink stream as the source.

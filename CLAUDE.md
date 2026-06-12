@@ -4,13 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Hardware-In-the-Loop (HIL) actuator test harness for the **Cursr-V Antenna Tracker**. The ESP32-S3 firmware drives a pan/tilt rig and exchanges newline-delimited JSON with the companion Web UI in `hil_panel/`. There is no flight-software entry point in this branch — `src/main.cpp` is the test harness only.
+Hardware-In-the-Loop (HIL) actuator test harness **and standalone mission firmware** for the **Cursr-V Antenna Tracker**. Two entry points:
+
+- `src/main.cpp` (env `esp32s3usbotg`, default) — HIL test harness, laptop-driven over USB JSON.
+- `src/mission/mission_main.cpp` (env `mission`) — real-launch firmware: telemetry over UART from the ground Heltec, low-power armed standby, automatic launch detection. See the Mission firmware section below.
 
 ## Build / Flash / Monitor (PlatformIO)
 
 ```powershell
-pio run                       # build firmware for env esp32s3usbotg
-pio run -t upload             # flash over USB-CDC
+pio run                       # build HIL firmware (env esp32s3usbotg)
+pio run -t upload             # flash HIL over USB-CDC
+pio run -e mission -t upload  # flash the standalone mission firmware
 pio device monitor            # serial monitor @ 115200
 pio run -t clean              # clean build artifacts
 ```
@@ -24,6 +28,7 @@ No unit test framework is wired up — `test/` contains only PlatformIO's placeh
 - **`component_check.html`** (Bring-up) — per-component wiring checkout with one link-status pill per part (stepper sweep, servo slider, live encoder dial, GNSS).
 - **`test_bench.html`** (Version A) — per-peripheral checkout with raw + interpreted readouts and a one-click self-test that fires every command and verifies the replies (incl. timed sweeps and error branches).
 - **`mission.html`** (Version B) — integrated Setup→Standby→Active mission console with a dependency-free Canvas-2D tracker sphere, trajectory simulator, and pipeline view. A single source-of-truth state keeps az / coordinate / sphere consistent.
+- **`monitor.html`** (Read-only) — live viewer for the standalone mission firmware. It **never acquires a serial writer**, so it cannot interfere with a mission; keep it that way.
 
 The JSON protocol the panels speak is the single source of truth in **`hil_panel/PROTOCOL.md`**; keep it, the firmware, and the panels in sync.
 
@@ -88,9 +93,17 @@ Telemetry emits each sensor's **raw** wire value beside the actuator state so th
 - Telemetry: 10 Hz
 - Serial parse: non-blocking, char-at-a-time accumulation in a 256-byte `String` buffer
 
-### Unused-in-HIL components
+### Mission firmware (`src/mission/mission_main.cpp`, env `mission`)
 
-`lib/TelemetryPacket` defines the 22-byte LoRa binary packet for the real receiver (UART2 from a Heltec gateway); it's not referenced by the HIL `main.cpp`. It is present for the production firmware that lives elsewhere — leave the include available, but don't expect it on any HIL code path.
+Standalone real-launch build — no laptop required. Rocket position arrives as 28-byte **GroundLinkPacket** frames (defined in `lib/TelemetryPacket`) over `Serial1` (RX=GPIO 44, 115200 8N1) from the ground Heltec; the drop-in transmitter module for the Heltec side lives in **`heltec_uplink/TrackerUplink.h`** (self-contained copy of the packet — keep the two layouts in sync).
+
+State machine: `wait_link → pad_lock → armed → tracking ↔ signal_lost`. Pad position is an EMA of incoming fixes; **armed** is the low-power standby (TB6600 de-energised via `Actuators::setPanEnabled(false)`, servo PWM stopped via `setTiltActive(false)` — the AS5048A is absolute so position survives); launch is auto-detected (`LAUNCH_*` constants in config.h) and tracking reuses the HIL `track` pipeline (precise ECEF→ENU, alpha-beta filters at `LINK_RATE_HZ`, `enuToGeodetic`, `computePointing`). USB-CDC emits the same 10 Hz `tel` JSON plus mission fields (see PROTOCOL.md); inbound commands are limited to `set_base`/`set_pid` pre-flight — everything else is rejected so a plugged-in laptop can't interfere. `monitor.html` is the matching read-only viewer.
+
+Full mission rehearsal without rocket or radio: `python tools/uart_replay.py COM<n>` streams `flight_data.csv` as GroundLinkPacket frames through a USB-UART adapter into GPIO 44 (pad hold → auto launch detect → tracking).
+
+### TelemetryPacket
+
+`lib/TelemetryPacket` defines both wire formats: the legacy 22-byte `TelemetryPacket` (flight computer → rocket radio; layout frozen, not referenced by HIL `main.cpp`) and the 28-byte `GroundLinkPacket` + `PacketStreamParser` used by the mission firmware's UART uplink.
 
 `lib/SignalFilter` (alpha-beta filter, tuned via `AB_ALPHA/BETA` in config) **is now exercised in HIL** on the `track` command path: `main.cpp` runs three instances (one per E/N/U axis, `dt = 1/TRACK_STREAM_HZ`) to smooth the streamed flight-replay position before the WGS84 reconstruction and pointing. See the flight-replay pipeline below.
 

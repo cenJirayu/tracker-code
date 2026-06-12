@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cursr-V · Mission Monitor</title>
+<style>
+/* ===========================================================================
+   Cursr-V — Mission Monitor (READ-ONLY)
+   Live view of the standalone mission firmware over USB-CDC. This page only
+   ever READS from the serial port — it never acquires a writer — so plugging
+   in and watching can never interfere with a mission.
+   Self-contained: no external scripts, no web fonts, no internet required.
+   =========================================================================== */
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0e1a; --card:#141a2e; --card2:#0f1424; --border:#26304d;
+  --accent:#6c8cff; --accent2:#a78bfa; --green:#34d399; --red:#f87171;
+  --yellow:#fbbf24; --text:#e2e8f0; --text2:#94a3b8; --radius:12px;
+  --mono:ui-monospace,"Cascadia Code","Consolas",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh}
+.app{max-width:1500px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+a{color:var(--accent)}
+
+.header{display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:12px 20px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);flex-wrap:wrap}
+.header h1{font-size:1.1rem;font-weight:600;color:var(--accent)}
+.header .sub{font-size:.72rem;color:var(--text2)}
+.connect-area{display:flex;align-items:center;gap:12px}
+.status-row{display:flex;align-items:center;gap:8px;font-size:.8rem}
+.status-dot{width:9px;height:9px;border-radius:50%;background:var(--red);box-shadow:0 0 8px var(--red);transition:.3s}
+.status-row.connected .status-dot{background:var(--green);box-shadow:0 0 8px var(--green)}
+.btn{padding:8px 16px;border:1px solid var(--border);border-radius:8px;background:#1b2238;
+  color:var(--accent);font-family:var(--sans);font-size:.8rem;font-weight:500;cursor:pointer;transition:.15s;white-space:nowrap}
+.btn:hover:not(:disabled){background:#243056;border-color:var(--accent)}
+.btn-green{background:#10301f;color:var(--green);border-color:#1d6943}
+.btn-green:hover:not(:disabled){background:#174a30}
+.btn-red{background:#341a1a;color:var(--red);border-color:#7a2f2f}
+.btn-red:hover:not(:disabled){background:#4a2424}
+
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px}
+.card-title{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:1.4px;
+  color:var(--accent);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.grid{display:grid;gap:12px}
+.cols-3{grid-template-columns:1fr 1fr 1fr}
+
+/* mission state strip */
+.statestrip{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.mstate{font-family:var(--mono);font-size:1.05rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;
+  padding:8px 18px;border-radius:10px;background:#2a3350;color:var(--text2);transition:.3s}
+.mstate.wait_link{background:#2a3350;color:var(--text2)}
+.mstate.pad_lock{background:#2a2f12;color:var(--yellow)}
+.mstate.armed{background:#12222f;color:var(--accent)}
+.mstate.tracking{background:#10301f;color:var(--green)}
+.mstate.signal_lost{background:#341a1a;color:var(--red)}
+.flow{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:.62rem;color:var(--text2)}
+.flow span{padding:3px 8px;border-radius:14px;background:var(--card2);border:1px solid var(--border);text-transform:uppercase;letter-spacing:.5px}
+.flow span.on{background:#10301f;color:var(--green);border-color:#1d6943}
+.pill{font-family:var(--mono);font-size:.62rem;font-weight:700;letter-spacing:.5px;
+  padding:3px 9px;border-radius:20px;background:#2a3350;color:var(--text2);text-transform:uppercase;white-space:nowrap}
+.pill.ok{background:#10301f;color:var(--green)}
+.pill.warn{background:#2a2f12;color:var(--yellow)}
+.pill.bad{background:#341a1a;color:var(--red)}
+
+/* readouts */
+.readout{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px}
+.ro{background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:7px 8px}
+.ro .lab{font-size:.56rem;text-transform:uppercase;letter-spacing:.7px;color:var(--text2);margin-bottom:3px}
+.ro .raw{font-family:var(--mono);font-size:.92rem;font-weight:600;color:var(--green)}
+.ro .int{font-family:var(--mono);font-size:.66rem;color:var(--accent2);margin-top:1px}
+.hint{font-size:.66rem;color:var(--text2);margin-top:8px;line-height:1.5}
+
+.azwrap{display:flex;gap:14px;align-items:center}
+#azDial{flex-shrink:0;background:var(--card2);border:1px solid var(--border);border-radius:50%}
+.azwrap .readout{flex:1}
+
+#log{height:130px;overflow-y:auto;background:#070b15;border:1px solid var(--border);border-radius:8px;
+  padding:8px;font-family:var(--mono);font-size:.7rem;white-space:pre-wrap;word-break:break-all}
+#log div{padding:1px 0}
+@media(max-width:1100px){.cols-3{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="header">
+    <div>
+      <h1>Cursr-V · Mission Monitor</h1>
+      <div class="sub">Read-only — this page never sends anything to the tracker · <a href="index.html">← All panels</a></div>
+    </div>
+    <div class="connect-area">
+      <div class="status-row" id="statusRow"><span class="status-dot"></span><span id="statusText">Disconnected</span></div>
+      <button class="btn btn-green" id="btnConnect">Connect</button>
+    </div>
+  </div>
+
+  <!-- Mission state -->
+  <div class="card">
+    <div class="card-title">🚀 Mission State<span class="pill" id="pillMotors" style="margin-left:auto">MOTORS —</span></div>
+    <div class="statestrip">
+      <div class="mstate" id="mstate">—</div>
+      <div class="flow" id="flow">
+        <span data-s="wait_link">wait link</span>›
+        <span data-s="pad_lock">pad lock</span>›
+        <span data-s="armed">armed</span>›
+        <span data-s="tracking">tracking</span>
+      </div>
+      <div style="margin-left:auto" class="readout">
+        <div class="ro"><div class="lab">Uptime</div><div class="raw" id="up">—</div></div>
+        <div class="ro"><div class="lab">Pkt age</div><div class="raw" id="age">—</div><div class="int">ms since last fix</div></div>
+      </div>
+    </div>
+    <div class="hint">In <b>ARMED</b> the stepper is de-energised (zero holding current) — the firmware re-powers it
+      and starts tracking on its own the moment launch is detected. No command can move the rig from this page.</div>
+  </div>
+
+  <div class="grid cols-3">
+    <!-- Uplink -->
+    <div class="card">
+      <div class="card-title">📡 Uplink (ground Heltec → UART)<span class="pill" id="pillLink" style="margin-left:auto">—</span></div>
+      <div class="readout">
+        <div class="ro"><div class="lab">RSSI</div><div class="raw" id="rssi">—</div><div class="int">dBm</div></div>
+        <div class="ro"><div class="lab">SNR</div><div class="raw" id="snr">—</div><div class="int">dB</div></div>
+        <div class="ro"><div class="lab">Seq</div><div class="raw" id="seq">—</div></div>
+        <div class="ro"><div class="lab">Rate</div><div class="raw" id="rate">—</div><div class="int">pkt/s</div></div>
+        <div class="ro"><div class="lab">Frames OK</div><div class="raw" id="rxok">—</div></div>
+        <div class="ro"><div class="lab">Frames bad</div><div class="raw" id="rxbad">—</div></div>
+      </div>
+    </div>
+
+    <!-- Pointing -->
+    <div class="card">
+      <div class="card-title">🧭 Pointing</div>
+      <div class="azwrap">
+        <canvas id="azDial" width="110" height="110"></canvas>
+        <div class="readout">
+          <div class="ro"><div class="lab">Az target</div><div class="raw" id="azt">—</div><div class="int">deg</div></div>
+          <div class="ro"><div class="lab">Az current</div><div class="raw" id="azc">—</div><div class="int">deg</div></div>
+          <div class="ro"><div class="lab">El target</div><div class="raw" id="elt">—</div><div class="int">deg</div></div>
+          <div class="ro"><div class="lab">PID / SPS</div><div class="raw" id="pid">—</div><div class="int" id="sps">—</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Positions -->
+    <div class="card">
+      <div class="card-title">🌍 Positions</div>
+      <div class="readout">
+        <div class="ro"><div class="lab">Base</div><div class="raw" id="base">—</div><div class="int" id="basesrc">—</div></div>
+        <div class="ro"><div class="lab">Pad</div><div class="raw" id="pad">—</div><div class="int" id="padn">—</div></div>
+        <div class="ro"><div class="lab">Rocket</div><div class="raw" id="rkt">—</div><div class="int" id="rktalt">—</div></div>
+        <div class="ro"><div class="lab">Climb</div><div class="raw" id="clb">—</div><div class="int">m/s</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Raw line log -->
+  <div class="card">
+    <div class="card-title">🗒 Event Log<span class="pill" id="pillMode" style="margin-left:auto">—</span></div>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+
+// ===========================================================================
+// Web Serial — READ ONLY. port.writable is never touched.
+// ===========================================================================
+let port=null, reader=null, connected=false, rxBuf='';
+
+$('btnConnect').addEventListener('click',()=>connected?disconnect():connect());
+
+async function connect(){
+  if(!navigator.serial){ log('Web Serial unavailable — use Chrome or Edge.','var(--red)'); return; }
+  try{
+    port=await navigator.serial.requestPort();
+    await port.open({baudRate:115200});
+    connected=true; setConnUI(true); readLoop();
+    log('— monitoring (read-only) —','var(--green)');
+  }catch(e){ log('Connect failed: '+e.message,'var(--red)'); }
+}
+async function disconnect(){
+  connected=false;
+  try{ if(reader) await reader.cancel(); }catch(e){}
+  try{ if(port) await port.close(); }catch(e){}
+  reader=port=null; setConnUI(false);
+  log('— disconnected —','var(--red)');
+}
+async function readLoop(){
+  const dec=new TextDecoderStream();
+  port.readable.pipeTo(dec.writable).catch(()=>{});
+  reader=dec.readable.getReader();
+  try{
+    while(true){
+      const {value,done}=await reader.read();
+      if(done) break;
+      rxBuf+=value;
+      const lines=rxBuf.split('\n'); rxBuf=lines.pop();
+      for(const ln of lines){ const s=ln.trim(); if(s) handleLine(s); }
+    }
+  }catch(e){}
+  if(connected) disconnect();
+}
+function setConnUI(on){
+  $('statusRow').classList.toggle('connected',on);
+  $('statusText').textContent=on?'Monitoring':'Disconnected';
+  $('btnConnect').textContent=on?'Disconnect':'Connect';
+  $('btnConnect').classList.toggle('btn-red',on);
+  $('btnConnect').classList.toggle('btn-green',!on);
+}
+
+// ===========================================================================
+// Telemetry handling
+// ===========================================================================
+let lastRxOk=null, lastRxOkAt=0;
+
+function handleLine(line){
+  let m; try{ m=JSON.parse(line); }catch(e){ return; }
+  if(m.t==='tel'){ renderTel(m); return; }
+  // ready / ack / err are rare — log them all
+  log(line, m.t==='err'?'var(--red)':'var(--accent)');
+}
+
+function fmtLL(lat,lon){ return (+lat).toFixed(5)+', '+(+lon).toFixed(5); }
+function fmtUp(ms){ const s=Math.floor(ms/1000); return Math.floor(s/60)+'m '+(s%60)+'s'; }
+
+function renderTel(m){
+  $('pillMode').textContent=(m.mode||'hil').toUpperCase();
+  $('up').textContent=fmtUp(m.up||0);
+
+  // State strip
+  const st=m.mstate||'—';
+  const el=$('mstate'); el.textContent=st.replace('_',' '); el.className='mstate '+st;
+  document.querySelectorAll('#flow span').forEach(sp=>{
+    sp.classList.toggle('on', sp.dataset.s===st || (st==='signal_lost'&&sp.dataset.s==='tracking'));
+  });
+  const mot=$('pillMotors');
+  mot.textContent='MOTORS '+(m.mot?'LIVE':'OFF');
+  mot.className='pill '+(m.mot?'ok':'warn');
+
+  // Uplink
+  const age=(m.age_ms===undefined||m.age_ms<0)?null:m.age_ms;
+  $('age').textContent=age===null?'—':age;
+  const lp=$('pillLink');
+  if(age===null){ lp.textContent='NO LINK'; lp.className='pill bad'; }
+  else if(age<1000){ lp.textContent='LIVE'; lp.className='pill ok'; }
+  else { lp.textContent='STALE'; lp.className='pill warn'; }
+  $('rssi').textContent=m.rssi!==undefined?m.rssi:'—';
+  $('snr').textContent =m.snr !==undefined?m.snr :'—';
+  $('seq').textContent =m.seq !==undefined?m.seq :'—';
+  $('rxok').textContent =m.rx_ok !==undefined?m.rx_ok :'—';
+  $('rxbad').textContent=m.rx_bad!==undefined?m.rx_bad:'—';
+  if(m.rx_ok!==undefined){
+    const now=performance.now();
+    if(lastRxOk!==null && now>lastRxOkAt){
+      const r=(m.rx_ok-lastRxOk)/((now-lastRxOkAt)/1000);
+      $('rate').textContent=r<0?'—':r.toFixed(1);
+    }
+    lastRxOk=m.rx_ok; lastRxOkAt=now;
+  }
+
+  // Pointing
+  $('azt').textContent=m.az_t; $('azc').textContent=m.az_c; $('elt').textContent=m.el_t;
+  $('pid').textContent=m.pid; $('sps').textContent=m.sps+' sps';
+  drawDial(+m.az_t,+m.az_c);
+
+  // Positions
+  if(m.base_lat!==undefined){ $('base').textContent=fmtLL(m.base_lat,m.base_lon); $('basesrc').textContent=m.base_src+' · '+m.base_alt+' m'; }
+  if(m.pad_lat!==undefined){ $('pad').textContent=fmtLL(m.pad_lat,m.pad_lon); $('padn').textContent=m.pad_n+' pkts · '+m.pad_alt+' m'; }
+  if(m.rkt_lat!==undefined){ $('rkt').textContent=fmtLL(m.rkt_lat,m.rkt_lon); $('rktalt').textContent=m.rkt_alt+' m MSL'; }
+  if(m.clb!==undefined) $('clb').textContent=m.clb;
+}
+
+// Azimuth dial — target (violet) vs current (green) needles
+function drawDial(azT,azC){
+  const cv=$('azDial'), ctx=cv.getContext('2d'), c=55, r=46;
+  ctx.clearRect(0,0,110,110);
+  ctx.strokeStyle='#26304d'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(c,c,r,0,Math.PI*2); ctx.stroke();
+  ctx.fillStyle='#94a3b8'; ctx.font='9px sans-serif'; ctx.textAlign='center';
+  ctx.fillText('N',c,c-r+10);
+  const needle=(deg,col,len)=>{
+    if(isNaN(deg)) return;
+    const a=(deg-90)*Math.PI/180;
+    ctx.strokeStyle=col; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(c,c);
+    ctx.lineTo(c+Math.cos(a)*len, c+Math.sin(a)*len); ctx.stroke();
+  };
+  needle(azT,'#a78bfa',r-6);
+  needle(azC,'#34d399',r-14);
+  ctx.fillStyle='#6c8cff'; ctx.beginPath(); ctx.arc(c,c,3,0,Math.PI*2); ctx.fill();
+}
+drawDial(NaN,NaN);
+
+function log(msg,color){
+  const d=document.createElement('div');
+  d.textContent=msg; if(color) d.style.color=color;
+  const el=$('log'); el.appendChild(d);
+  while(el.childElementCount>200) el.removeChild(el.firstChild);
+  el.scrollTop=el.scrollHeight;
+}
+</script>
+</body>
+</html>

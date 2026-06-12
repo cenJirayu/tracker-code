@@ -249,6 +249,33 @@ void Actuators::setTiltAngle(float elevDeg) {
 }
 
 // ============================================================================
+//  Standby power control — mission mode
+// ============================================================================
+void Actuators::setPanEnabled(bool enabled) {
+    digitalWrite(PIN_ENABLE, enabled ? LOW : HIGH);   // TB6600 enable is active-low
+    if (!enabled) {
+        // Zero the controller so re-enabling doesn't replay stale state.
+        _stepper.setSpeed(0.0f);
+        _integralError    = 0.0f;
+        _prevError        = 0.0f;
+        _lastPidOutput    = 0.0f;
+        _lastCommandedSPS = 0.0f;
+    }
+}
+
+void Actuators::setTiltActive(bool active) {
+    if (active) {
+        mcpwm_set_duty_in_us(SERVO_MCPWM_UNIT, SERVO_MCPWM_TIMER,
+                              MCPWM_GEN_A, _lastTiltPulseUs);
+        // set_signal_low forces the generator low; restore normal duty mode.
+        mcpwm_set_duty_type(SERVO_MCPWM_UNIT, SERVO_MCPWM_TIMER,
+                             MCPWM_GEN_A, MCPWM_DUTY_MODE_0);
+    } else {
+        mcpwm_set_signal_low(SERVO_MCPWM_UNIT, SERVO_MCPWM_TIMER, MCPWM_GEN_A);
+    }
+}
+
+// ============================================================================
 //  HIL Helper Methods — Simulated Encoder & Telemetry
 // ============================================================================
 void Actuators::updatePanWithPosition(float currentAzDeg) {

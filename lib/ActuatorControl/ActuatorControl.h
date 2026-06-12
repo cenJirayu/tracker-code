@@ -58,6 +58,15 @@ public:
     // ---- Tilt (Elevation) ----
     void  setTiltAngle(float elevDeg);
 
+    // ---- Standby power control (mission mode) ----
+    // De-energise/re-energise the TB6600 (active-low ENABLE). Disabled = zero
+    // holding current; the AS5048A is absolute so no position is lost.
+    void  setPanEnabled(bool enabled);
+    // Stop/restart the servo PWM. Without pulses a digital servo relaxes.
+    // While inactive, setTiltAngle() still records the pulse width but the
+    // output stays low until setTiltActive(true) re-arms it.
+    void  setTiltActive(bool active);
+
     // ---- PID Tuning ----
     void  setPanPID(float Kp, float Ki, float Kd);
 
