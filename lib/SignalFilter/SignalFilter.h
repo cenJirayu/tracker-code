@@ -21,12 +21,6 @@ public:
     /// Feed a new raw measurement and return the smoothed estimate.
     float update(float measurement);
 
-    /// Most recent smoothed position estimate.
-    float getPosition() const;
-
-    /// Most recent estimated velocity (units/s).
-    float getVelocity() const;
-
 private:
     float _alpha;
     float _beta;

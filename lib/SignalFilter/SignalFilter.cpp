@@ -40,11 +40,3 @@ float AlphaBetaFilter::update(float measurement) {
 
     return _xk;
 }
-
-float AlphaBetaFilter::getPosition() const {
-    return _xk;
-}
-
-float AlphaBetaFilter::getVelocity() const {
-    return _vk;
-}

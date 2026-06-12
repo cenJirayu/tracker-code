@@ -113,10 +113,6 @@ static constexpr float AB_ALPHA = 0.85f;
 /// Velocity smoothing gain (0 < β ≤ 1). Higher = faster velocity adaptation.
 static constexpr float AB_BETA  = 0.005f;
 
-/// Expected time step between telemetry samples (seconds).
-/// 0.01 = 100 Hz, 0.02 = 50 Hz
-static constexpr float AB_DT    = 0.01f;
-
 // ============================================================================
 //  FLIGHT-REPLAY TRACK STREAM (mission.html → `track` command)
 // ============================================================================
@@ -130,19 +126,12 @@ static constexpr float TRACK_STREAM_HZ = 15.0f;
 /// the start of a fresh replay resets the smoothing state.
 static constexpr unsigned long TRACK_IDLE_RESET_MS = 500;
 
-/// Launch-site ground level (m MSL) for flight_data.csv. The base station is set
-/// here during replay so elevation starts on the horizon (Z starts/ends at 892).
-static constexpr double HIL_LAUNCH_BASE_ALT = 892.0;
-
 // ============================================================================
 //  CONTROL LOOP TIMING
 // ============================================================================
 
 /// PID update interval in microseconds (5000 µs = 200 Hz)
 static constexpr unsigned long PID_INTERVAL_US  = 5000;
-
-/// Serial debug output interval in milliseconds
-static constexpr unsigned long DEBUG_INTERVAL_MS = 500;
 
 // ============================================================================
 //  HIL TEST DEFAULTS
@@ -160,7 +149,7 @@ static constexpr unsigned long TELEMETRY_INTERVAL_MS = 100;  // 10 Hz
 static constexpr float SWEEP_SPEED_DEG_PER_SEC = 30.0f;
 
 // ============================================================================
-//  GNSS PRECISE-FIX THRESHOLDS (base station auto-set in setup)
+//  GNSS PRECISE-FIX THRESHOLDS (background base acquisition in loop)
 // ============================================================================
 
 /// Minimum satellites-in-view required to accept a fix as "precise".
@@ -168,8 +157,5 @@ static constexpr uint8_t  GNSS_PRECISE_MIN_SATS  = 6;
 
 /// Maximum horizontal accuracy (metres) required to accept the fix.
 static constexpr float    GNSS_PRECISE_MAX_HACC_M = 5.0f;
-
-/// How long setup() waits for a precise fix before falling back to defaults.
-static constexpr uint32_t GNSS_FIX_TIMEOUT_MS     = 120000;  // 120 s
 
 #endif // CONFIG_H

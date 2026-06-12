@@ -67,20 +67,9 @@ public:
     int32_t  getAltRawMM()    const { return _fix.altRawMM; }
     uint32_t getHaccRawMM()   const { return _fix.hAccRawMM; }
 
-    /// Fill lat/lon/alt in one call; returns isValid().
-    bool getLocation(double& lat, double& lon, float& alt) const;
-
-    /// Milliseconds since the last valid fix was received (UINT32_MAX if never).
-    uint32_t msSinceLastFix() const;
-
-    /// Direct access to the underlying SparkFun driver for advanced use.
-    SFE_UBLOX_GNSS& driver() { return _gnss; }
-
 private:
     SFE_UBLOX_GNSS _gnss;
     GNSSFix        _fix;
-    uint32_t       _lastFixMs;   // millis() at last valid fix
-    bool           _everHadFix;
 };
 
 #endif // GNSS_MANAGER_H

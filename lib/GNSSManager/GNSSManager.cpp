@@ -10,7 +10,7 @@ static constexpr uint8_t UBLOX_I2C_ADDR = 0x42;
 static constexpr uint8_t MIN_FIX_TYPE = 2;
 
 GNSSManager::GNSSManager()
-    : _fix{}, _lastFixMs(0), _everHadFix(false)
+    : _fix{}
 {
     _fix.valid = false;
 }
@@ -34,8 +34,7 @@ bool GNSSManager::begin(TwoWire& wire, uint8_t rateHz)
     _gnss.setMeasurementRate(periodMs);
     _gnss.setNavigationRate(1);  // one solution per measurement
 
-    // SAM-M10Q default dynamic model is portable (0); leave it unless the
-    // caller overrides via driver().setDynamicModel() after begin().
+    // SAM-M10Q default dynamic model is portable (0) — left as-is.
 
     _gnss.saveConfigSelective(VAL_CFG_SUBSEC_IOPORT);
 
@@ -70,26 +69,5 @@ bool GNSSManager::update()
     _fix.altMSL    = _fix.altRawMM  * 1e-3f;  // mm → m
     _fix.horizAccM = _fix.hAccRawMM * 1e-3f;  // mm → m
 
-    if (_fix.valid) {
-        _lastFixMs   = millis();
-        _everHadFix  = true;
-    }
-
     return true;
-}
-
-bool GNSSManager::getLocation(double& lat, double& lon, float& alt) const
-{
-    lat = _fix.lat;
-    lon = _fix.lon;
-    alt = _fix.altMSL;
-    return _fix.valid;
-}
-
-uint32_t GNSSManager::msSinceLastFix() const
-{
-    if (!_everHadFix) {
-        return UINT32_MAX;
-    }
-    return millis() - _lastFixMs;
 }

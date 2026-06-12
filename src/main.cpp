@@ -35,10 +35,9 @@ bool hasGNSS    = false;   // u-blox GNSS drives the base station
 // toggle (hasGNSS).
 bool gnssHardwareOk = false;
 
-// One-shot guard for the background base acquisition in loop(). Replaces the
-// old blocking 120 s wait in setup(): the first precise fix is adopted as the
-// base exactly once, and any manual control (set_base / set_sensors gps)
-// disables it so it can't override the operator.
+// One-shot guard for the background base acquisition in loop(): the first
+// precise fix is adopted as the base exactly once, and any manual control
+// (set_base / set_sensors gps) disables it so it can't override the operator.
 bool gnssAutoBaseDone = false;
 
 // ============================================================================
@@ -112,7 +111,11 @@ void updateSweep();
 void updatePanAxis();
 void sendTelemetry();
 void sendAck(const char* cmd, JsonDocument* extra = nullptr);
+void sendPointingAck(const char* cmd);
 void sendError(const char* msg);
+void pointAtTarget(double lat, double lon, double alt);
+void adoptGnssBase();
+void resetTrackFilters();
 
 // ============================================================================
 //  SETUP
@@ -126,11 +129,9 @@ void setup() {
     actuators.begin();
 
     // ---- GNSS (u-blox SAM-M10Q, I2C) ----
-    // Detect the module but DO NOT block boot waiting for a fix. The previous
-    // code spun here for up to GNSS_FIX_TIMEOUT_MS (120 s) before emitting any
-    // telemetry, so indoors (no precise fix) the harness looked dead. Fix
-    // acquisition now runs non-blocking in loop() (see the background-adopt
-    // block); the base stays at the default until a precise fix arrives.
+    // Detect the module but DO NOT block boot waiting for a fix — acquisition
+    // runs non-blocking in loop(); the base stays at the default until a
+    // precise fix arrives.
     gnssHardwareOk = gnss.begin();
     if (gnssHardwareOk) {
         Serial.println("HIL: GNSS OK - acquiring fix in background (non-blocking).");
@@ -201,24 +202,20 @@ void loop() {
     if (gnssHardwareOk) {
         gnss.update();
 
-        // Background base acquisition (replaces the old blocking setup() wait):
-        // adopt the first precise fix as the base, exactly once, unless the
-        // operator has already taken manual control via set_base/set_sensors.
+        // Background base acquisition: adopt the first precise fix as the
+        // base, exactly once, unless the operator has already taken manual
+        // control via set_base/set_sensors.
         if (!gnssAutoBaseDone
                 && gnss.isValid()
                 && gnss.getSatsUsed() >= GNSS_PRECISE_MIN_SATS
                 && gnss.getHorizAccM() <= GNSS_PRECISE_MAX_HACC_M) {
-            baseLat = gnss.getLat();
-            baseLon = gnss.getLon();
-            baseAlt = gnss.getAlt();
+            adoptGnssBase();
             hasGNSS = true;
             gnssAutoBaseDone = true;
         }
 
         if (hasGNSS && gnss.isValid()) {
-            baseLat = gnss.getLat();
-            baseLon = gnss.getLon();
-            baseAlt = gnss.getAlt();
+            adoptGnssBase();
         }
     }
 
@@ -284,9 +281,7 @@ void processCommand(JsonDocument& doc) {
         if (doc["gps"].is<bool>()) {
             bool newGNSS = doc["gps"];
             if (newGNSS && !hasGNSS && gnssHardwareOk && gnss.isValid()) {
-                baseLat = gnss.getLat();
-                baseLon = gnss.getLon();
-                baseAlt = gnss.getAlt();
+                adoptGnssBase();
             }
             hasGNSS = newGNSS;
             gnssAutoBaseDone = true;  // operator now controls the base source
@@ -308,11 +303,7 @@ void processCommand(JsonDocument& doc) {
             actuators.setTiltAngle(targetEl);
         }
         sweepState = SWEEP_NONE;
-
-        JsonDocument ack;
-        ack["az"] = targetAz;
-        ack["el"] = targetEl;
-        sendAck("direct", &ack);
+        sendPointingAck("direct");
     }
     // ---- inject: WGS84 coordinates → Az/El via Navigation ----
     else if (strcmp(cmd, "inject") == 0) {
@@ -320,31 +311,10 @@ void processCommand(JsonDocument& doc) {
             sendError("inject: missing lat/lon/alt");
             return;
         }
-        double tgtLat = doc["lat"].as<double>();
-        double tgtLon = doc["lon"].as<double>();
-        double tgtAlt = doc["alt"].as<double>();
-
-        PointingAngles pa = computePointing(baseLat, baseLon, baseAlt,
-                                             tgtLat,  tgtLon,  tgtAlt);
-        targetAz = (float)pa.azimuth;
-        targetEl = (float)pa.elevation;
-        if (targetEl < TILT_MIN_DEG) targetEl = TILT_MIN_DEG;
-        if (targetEl > TILT_MAX_DEG) targetEl = TILT_MAX_DEG;
-
-        actuators.setTargetAzimuth(targetAz);
-        actuators.setTiltAngle(targetEl);
-        sweepState = SWEEP_NONE;
-
-        // Track last injected target for pipeline telemetry
-        lastTgtLat   = tgtLat;
-        lastTgtLon   = tgtLon;
-        lastTgtAlt   = tgtAlt;
-        hasLastInject = true;
-
-        JsonDocument ack;
-        ack["az"] = targetAz;
-        ack["el"] = targetEl;
-        sendAck("inject", &ack);
+        pointAtTarget(doc["lat"].as<double>(),
+                      doc["lon"].as<double>(),
+                      doc["alt"].as<double>());
+        sendPointingAck("inject");
     }
     // ---- track: streamed local ENU position → filter → WGS84 → Az/El ----
     else if (strcmp(cmd, "track") == 0) {
@@ -357,9 +327,7 @@ void processCommand(JsonDocument& doc) {
         // last sample), so a new flight doesn't inherit the old smoothing state.
         unsigned long nowMs = millis();
         if (nowMs - lastTrackMs > TRACK_IDLE_RESET_MS) {
-            trackFilterE.reset();
-            trackFilterN.reset();
-            trackFilterU.reset();
+            resetTrackFilters();
         }
         lastTrackMs = nowMs;
 
@@ -371,33 +339,13 @@ void processCommand(JsonDocument& doc) {
         trkN = trackFilterN.update(trkNRaw);
         trkU = trackFilterU.update(trkURaw);
 
-        // CHANGE COORDINATE: filtered local ENU → WGS84 geodetic fix.
+        // CHANGE COORDINATE: filtered local ENU → WGS84 geodetic fix, then
+        // point the rig at it (WGS84 → Az/El → pan PID + tilt servo).
         Vec3d g = enuToGeodetic(trkE, trkN, trkU, baseLat, baseLon, baseAlt);
+        pointAtTarget(g.x, g.y, g.z);
+        trackActive = true;
 
-        // WGS84 → Az/El via the existing designed pointing transform.
-        PointingAngles pa = computePointing(baseLat, baseLon, baseAlt,
-                                            g.x, g.y, g.z);
-        targetAz = (float)pa.azimuth;
-        targetEl = (float)pa.elevation;
-        if (targetEl < TILT_MIN_DEG) targetEl = TILT_MIN_DEG;
-        if (targetEl > TILT_MAX_DEG) targetEl = TILT_MAX_DEG;
-
-        // MOTOR CONTROL: drive the pan PID + tilt servo to the new target.
-        actuators.setTargetAzimuth(targetAz);
-        actuators.setTiltAngle(targetEl);
-        sweepState = SWEEP_NONE;
-
-        // Echo the reconstructed WGS84 fix as the pipeline target.
-        lastTgtLat    = g.x;
-        lastTgtLon    = g.y;
-        lastTgtAlt    = g.z;
-        hasLastInject = true;
-        trackActive   = true;
-
-        JsonDocument ack;
-        ack["az"] = targetAz;
-        ack["el"] = targetEl;
-        sendAck("track", &ack);
+        sendPointingAck("track");
     }
     // ---- set_base: update base station coordinates ----
     else if (strcmp(cmd, "set_base") == 0) {
@@ -419,7 +367,7 @@ void processCommand(JsonDocument& doc) {
         actuators.setTiltAngle(0.0f);
         sweepState = SWEEP_NONE;
         trackActive = false;
-        trackFilterE.reset(); trackFilterN.reset(); trackFilterU.reset();
+        resetTrackFilters();
         sendAck("home");
     }
     // ---- set_pid: update PID gains ----
@@ -461,7 +409,7 @@ void processCommand(JsonDocument& doc) {
     else if (strcmp(cmd, "stop") == 0) {
         sweepState = SWEEP_NONE;
         trackActive = false;
-        trackFilterE.reset(); trackFilterN.reset(); trackFilterU.reset();
+        resetTrackFilters();
         sendAck("stop");
     }
     else {
@@ -610,6 +558,41 @@ void sendTelemetry() {
 }
 
 // ============================================================================
+//  Pointing / GNSS / Track Helpers
+// ============================================================================
+
+// Point the rig at a WGS84 target: compute Az/El from the base station, clamp
+// tilt to its mechanical range, drive both axes, cancel any sweep, and record
+// the target for pipeline telemetry.
+void pointAtTarget(double lat, double lon, double alt) {
+    PointingAngles pa = computePointing(baseLat, baseLon, baseAlt,
+                                        lat, lon, alt);
+    targetAz = (float)pa.azimuth;
+    targetEl = constrain((float)pa.elevation, TILT_MIN_DEG, TILT_MAX_DEG);
+
+    actuators.setTargetAzimuth(targetAz);
+    actuators.setTiltAngle(targetEl);
+    sweepState = SWEEP_NONE;
+
+    lastTgtLat    = lat;
+    lastTgtLon    = lon;
+    lastTgtAlt    = alt;
+    hasLastInject = true;
+}
+
+void adoptGnssBase() {
+    baseLat = gnss.getLat();
+    baseLon = gnss.getLon();
+    baseAlt = gnss.getAlt();
+}
+
+void resetTrackFilters() {
+    trackFilterE.reset();
+    trackFilterN.reset();
+    trackFilterU.reset();
+}
+
+// ============================================================================
 //  ACK / Error Helpers
 // ============================================================================
 void sendAck(const char* cmd, JsonDocument* extra) {
@@ -623,6 +606,14 @@ void sendAck(const char* cmd, JsonDocument* extra) {
     }
     serializeJson(doc, Serial);
     Serial.println();
+}
+
+// Ack carrying the resulting pointing target — shared by direct/inject/track.
+void sendPointingAck(const char* cmd) {
+    JsonDocument ack;
+    ack["az"] = targetAz;
+    ack["el"] = targetEl;
+    sendAck(cmd, &ack);
 }
 
 void sendError(const char* msg) {

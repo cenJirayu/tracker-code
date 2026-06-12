@@ -89,22 +89,24 @@ float Actuators::readEncoderDeg() {
     return _dirCorrectedDeg(readEncoderRaw());
 }
 
+// Wrap an arbitrary angle into [0, 360).
+float Actuators::_normalize360(float deg) {
+    while (deg < 0.0f)    deg += 360.0f;
+    while (deg >= 360.0f) deg -= 360.0f;
+    return deg;
+}
+
 // Raw 14-bit count → degrees, with the rig's rotation sense applied so the
 // angle grows clockwise. North offset is NOT applied here (callers add it).
 float Actuators::_dirCorrectedDeg(uint16_t raw) {
     float deg = (float)raw * (360.0f / 16384.0f);
-    if (ENC_DIR_INVERT) deg = 360.0f - deg;
-    if (deg >= 360.0f) deg -= 360.0f;   // raw==0 maps 360→0 after inversion
-    if (deg < 0.0f)    deg += 360.0f;
-    return deg;
+    if (ENC_DIR_INVERT) deg = 360.0f - deg;   // raw==0 maps 360→0 after inversion
+    return _normalize360(deg);
 }
 
 // Direction-corrected + North-referenced azimuth from a pre-read raw count.
 float Actuators::panAngleFromRaw(uint16_t raw) const {
-    float angle = _dirCorrectedDeg(raw) + _panOffset;
-    while (angle < 0.0f)    angle += 360.0f;
-    while (angle >= 360.0f) angle -= 360.0f;
-    return angle;
+    return _normalize360(_dirCorrectedDeg(raw) + _panOffset);
 }
 
 uint16_t Actuators::_spiTransfer16(uint16_t cmd) {
@@ -256,11 +258,8 @@ void Actuators::updatePanWithPosition(float currentAzDeg) {
 }
 
 float Actuators::getStepperPositionDeg() {
-    float deg = (float)_stepper.currentPosition() / STEPS_PER_DEGREE;
-    // Normalize to [0, 360)
-    while (deg < 0.0f)    deg += 360.0f;
-    while (deg >= 360.0f) deg -= 360.0f;
-    return deg;
+    // Stepper position is free-running (can be many revolutions), so wrap it.
+    return _normalize360((float)_stepper.currentPosition() / STEPS_PER_DEGREE);
 }
 
 float Actuators::getPidOutput() const {
@@ -269,10 +268,6 @@ float Actuators::getPidOutput() const {
 
 float Actuators::getStepperSpeed() {
     return _stepper.speed();
-}
-
-float Actuators::getTargetAzimuth() const {
-    return _targetAzDeg;
 }
 
 long Actuators::getStepCount() {

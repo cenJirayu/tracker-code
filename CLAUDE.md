@@ -19,12 +19,13 @@ No unit test framework is wired up — `test/` contains only PlatformIO's placeh
 
 ## Web UI
 
-`hil_panel/` holds two self-contained Web Serial panels plus a launcher (`index.html`). Open any of them directly in Chrome or Edge (Web Serial API is not available in Firefox/Safari) — they have **no external dependencies** (no CDN scripts, no web fonts) and run fully offline from `file://`:
+`hil_panel/` holds three self-contained Web Serial panels plus a launcher (`index.html`). Open any of them directly in Chrome or Edge (Web Serial API is not available in Firefox/Safari) — they have **no external dependencies** (no CDN scripts, no web fonts) and run fully offline from `file://`:
 
+- **`component_check.html`** (Bring-up) — per-component wiring checkout with one link-status pill per part (stepper sweep, servo slider, live encoder dial, GNSS).
 - **`test_bench.html`** (Version A) — per-peripheral checkout with raw + interpreted readouts and a one-click self-test that fires every command and verifies the replies (incl. timed sweeps and error branches).
 - **`mission.html`** (Version B) — integrated Setup→Standby→Active mission console with a dependency-free Canvas-2D tracker sphere, trajectory simulator, and pipeline view. A single source-of-truth state keeps az / coordinate / sphere consistent.
 
-The JSON protocol both panels speak is the single source of truth in **`hil_panel/PROTOCOL.md`**; keep it, the firmware, and the panels in sync.
+The JSON protocol the panels speak is the single source of truth in **`hil_panel/PROTOCOL.md`**; keep it, the firmware, and the panels in sync.
 
 ## Architecture
 

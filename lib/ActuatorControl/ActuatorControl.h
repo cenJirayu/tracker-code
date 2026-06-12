@@ -37,8 +37,6 @@ public:
 
     // ---- Pan (Azimuth) -----
     void  setPanNorthOffset(double northHeadingDeg);
-    float readEncoderDeg();
-    float getPanAngleDeg();
     // Direction-corrected, North-referenced azimuth from an already-read raw
     // count (no SPI access) — lets telemetry reuse its single per-tick read.
     float panAngleFromRaw(uint16_t raw) const;
@@ -51,7 +49,6 @@ public:
     float getStepperPositionDeg();
     float getPidOutput() const;
     float getStepperSpeed();
-    float getTargetAzimuth() const;
 
     // ---- Raw debug accessors (values straight off the actuators) ----
     uint16_t readEncoderRaw();        // AS5048A 14-bit angle counts [0,16383]
@@ -76,13 +73,18 @@ private:
     uint32_t _lastTiltPulseUs;
     unsigned long _lastPidUs;
 
-    // AS5048A helpers
+    // AS5048A encoder reads (internal — callers use panAngleFromRaw / readEncoderRaw).
+    float readEncoderDeg();
+    float getPanAngleDeg();
     uint16_t _spiTransfer16(uint16_t cmd);
     uint16_t _buildReadCommand(uint16_t address);
     static uint8_t _evenParity(uint16_t value);
     static float _angleDiffDeg(float target, float current);
     // Raw 14-bit count → direction-corrected degrees [0,360) (no North offset).
     static float _dirCorrectedDeg(uint16_t raw);
+    // Wrap an arbitrary angle into [0, 360). Loop form handles inputs that are
+    // many revolutions out (e.g. the free-running stepper position).
+    static float _normalize360(float deg);
 
     // Shared PID core. Both updatePan() and updatePanWithPosition() compute
     // their own positional error, then delegate the deadband + anti-windup +

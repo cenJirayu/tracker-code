@@ -384,6 +384,15 @@ async function disconnect(){
   log('— disconnected —','var(--red)');
 }
 
+// Device went away on its own (unplug / cable pull / board reset). Guarded on
+// state.connected so a manual disconnect — which clears the flag synchronously
+// before any await — won't re-enter here.
+function handleDeviceLost(reason){
+  if(!state.connected) return;
+  log('— device lost'+(reason?' ('+reason+')':'')+' —','var(--red)');
+  disconnect();
+}
+
 async function readLoop(){
   const dec = new TextDecoderStream();
   streamClosed = port.readable.pipeTo(dec.writable);
@@ -398,6 +407,10 @@ async function readLoop(){
       for(const ln of lines){ const t=ln.trim(); if(t) onLine(t); }
     }
   }catch(e){ if(state.connected) log('Read error: '+e.message,'var(--red)'); }
+  // Stream ended — device unplugged, cable pulled, or board reset. If the user
+  // didn't initiate this, tear down so the sim/flight timers and write attempts
+  // stop firing on a dead port (they run on the browser clock, not the device).
+  if(state.connected) handleDeviceLost('serial stream closed');
 }
 
 async function send(obj){
@@ -442,6 +455,7 @@ function onTelemetry(d){
   renderTelemetry(d);
   renderPipeline(d);
   pushChart(d);
+  requestScene();                       // current-pointing (green) marker moved
 }
 
 // ===========================================================================
@@ -505,6 +519,7 @@ function renderTarget(){
   $('el').value=t.el; $('elVal').textContent=fmt(t.el)+'°';
   $('tgtLat').value=fmt(t.lat,6); $('tgtLon').value=fmt(t.lon,6); $('tgtAlt').value=fmt(t.alt,0);
   $('siAzT').textContent=fmt(t.az)+'°'; $('siElT').textContent=fmt(t.el)+'°';
+  requestScene();                       // target (blue) marker moved
 }
 
 // ===========================================================================
@@ -607,7 +622,16 @@ function drawScene(){
   dot(O,4,'#cbd5e1');
 }
 function dot(p,r,c){sctx.beginPath();sctx.fillStyle=c;sctx.arc(p.x,p.y,r,0,Math.PI*2);sctx.fill();}
-function sceneLoop(){ drawScene(); requestAnimationFrame(sceneLoop); }
+// Render-on-demand. The sphere only changes when the target or telemetry changes,
+// so we draw once on the next animation frame *when asked* — instead of an
+// unconditional 60 fps loop that pegged a CPU core forever, even while idle or
+// disconnected. Multiple requestScene() calls within one frame coalesce into a
+// single draw; when nothing requests a draw the browser does zero work here.
+let sceneRAF=null;
+function requestScene(){
+  if(sceneRAF!==null) return;            // a draw is already queued for this frame
+  sceneRAF=requestAnimationFrame(()=>{ sceneRAF=null; drawScene(); });
+}
 
 // ===========================================================================
 //  Chart — az/el target vs current over time
@@ -622,7 +646,9 @@ function pushChart(d){
 }
 function drawChart(){
   const r=chart.getBoundingClientRect(), dpr=Math.min(devicePixelRatio,2);
-  chart.width=r.width*dpr; chart.height=r.height*dpr; cctx.setTransform(dpr,0,0,dpr,0,0);
+  const w=Math.round(r.width*dpr), h=Math.round(r.height*dpr);
+  if(w!==chart.width||h!==chart.height){ chart.width=w; chart.height=h; } // guard: don't realloc the backing store every telemetry frame
+  cctx.setTransform(dpr,0,0,dpr,0,0);
   const W=r.width,H=r.height; cctx.clearRect(0,0,W,H);
   cctx.strokeStyle='#1c2742'; cctx.lineWidth=1;
   for(let i=0;i<5;i++){const y=H*i/4;cctx.beginPath();cctx.moveTo(0,y);cctx.lineTo(W,y);cctx.stroke();}
@@ -818,11 +844,13 @@ function preset(p){
 //  Init
 // ===========================================================================
 wire();
+// Catch physical unplug / board reset so the sim & flight timers stop on their own.
+if(navigator.serial) navigator.serial.addEventListener('disconnect', e=>{ if(e.target===port) handleDeviceLost('device unplugged'); });
 renderTarget();
 applyPhase('setup');
-sceneLoop();
+requestScene();
 drawChart();
-window.addEventListener('resize', drawChart);
+window.addEventListener('resize', ()=>{ drawChart(); requestScene(); });
 log(navigator.serial ? '✓ Web Serial ready — Connect to begin.' : '⚠ Web Serial unavailable — use Chrome or Edge.',
     navigator.serial?'var(--green)':'var(--yellow)');
 </script>
